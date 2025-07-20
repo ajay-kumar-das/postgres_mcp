@@ -1,4 +1,3 @@
-# stop.sh
 #!/bin/bash
 
 PROFILE=${1:-development}
