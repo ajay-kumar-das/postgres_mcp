@@ -32,6 +32,14 @@ class SqlValidator {
         Pattern.compile("(?i)'\\s*(or|and)\\s+", Pattern.MULTILINE)
     )
 
+    // Block UNION, information_schema, and PostgreSQL system functions
+    private val forbiddenPatterns = listOf(
+        Pattern.compile("(?i)\\bunion\\b", Pattern.MULTILINE),
+        Pattern.compile("(?i)\\binformation_schema\\b", Pattern.MULTILINE),
+        Pattern.compile("(?i)\\bpg_\\w+\\b", Pattern.MULTILINE),
+        Pattern.compile("(?i)\\bcurrent_\\w+\\b", Pattern.MULTILINE)
+    )
+
     fun validateSelectQuery(query: String): ValidationResult {
         val trimmedQuery = query.trim()
 
@@ -60,6 +68,13 @@ class SqlValidator {
         val injectionCheck = checkForSqlInjection(trimmedQuery)
         if (!injectionCheck.isValid) {
             return injectionCheck
+        }
+
+        // Block forbidden patterns
+        for (pattern in forbiddenPatterns) {
+            if (pattern.matcher(trimmedQuery).find()) {
+                return ValidationResult(false, "Query contains forbidden pattern: $pattern")
+            }
         }
 
         // Validate parentheses balance

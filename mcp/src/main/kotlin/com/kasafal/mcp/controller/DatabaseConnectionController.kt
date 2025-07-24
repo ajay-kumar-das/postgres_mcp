@@ -28,7 +28,7 @@ class DatabaseConnectionController(
 
     @PostMapping
     fun createConnection(@Valid @RequestBody dto: DatabaseConnectionDto): ResponseEntity<DatabaseConnection> {
-        val connection = databaseService.createConnection(dto)
+        val connection = databaseService.createConnection()
         return ResponseEntity.status(HttpStatus.CREATED).body(connection)
     }
 

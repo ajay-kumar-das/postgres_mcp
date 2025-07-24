@@ -37,6 +37,17 @@ class GlobalExceptionHandler {
         ))
     }
 
+    @ExceptionHandler(InvalidSQlQueryException::class)
+    fun handleInvalidSQlQueryException(e: InvalidSQlQueryException): ResponseEntity<Map<String, Any>> {
+        logger.error(e) { "Alert: Invalid Query Exception: ${e.message}" }
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf(
+            "error" to "Query syntax error",
+            "message" to (e.message ?: "Unable to recognize query properly"),
+            "timestamp" to System.currentTimeMillis()
+        ))
+    }
+
     @ExceptionHandler(SQLException::class)
     fun handleSqlException(e: SQLException): ResponseEntity<Map<String, Any>> {
         logger.error(e) { "SQL Exception: ${e.message}" }

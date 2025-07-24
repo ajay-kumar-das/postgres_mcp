@@ -1,5 +1,6 @@
 package com.kasafal.mcp.service
 
+import com.kasafal.mcp.config.ClientDbConfig
 import com.kasafal.mcp.exception.DatabaseException
 import com.kasafal.mcp.model.database.*
 import com.kasafal.mcp.repository.DatabaseConnectionRepository
@@ -18,17 +19,18 @@ private val logger = KotlinLogging.logger {}
 @Service
 class DatabaseService(
     private val connectionRepository: DatabaseConnectionRepository,
-    private val credentialService: CredentialService
+    private val credentialService: CredentialService,
+    private val clientDbConfig: ClientDbConfig
 ) {
 
     private val dataSources = ConcurrentHashMap<Long, DataSource>()
 
-    fun createConnection(dto: DatabaseConnectionDto): DatabaseConnection {
-        logger.info { "Creating new database connection: ${dto.name}" }
+    fun createConnection(): DatabaseConnection {
+        logger.info { "Creating new database connection: ${clientDbConfig.name}" }
 
         // Check if connection already exists
         val existing = connectionRepository.findByNameAndHostAndPortAndDatabaseAndUsernameAndSchema(
-            dto.name, dto.host, dto.port, dto.database, dto.username, dto.schema
+            clientDbConfig.name, clientDbConfig.host, clientDbConfig.port, clientDbConfig.database, clientDbConfig.username, clientDbConfig.schema
         )
         if (existing != null) {
             logger.info { "Connection already exists: ${existing.id}" }
@@ -36,24 +38,36 @@ class DatabaseService(
         }
 
         // Test connection first
-        testConnection(dto)
+        testConnection()
 
-        val encryptedPassword = credentialService.encrypt(dto.password)
+        val encryptedPassword = credentialService.encrypt(clientDbConfig.password)
 
         val connection = DatabaseConnection(
-            name = dto.name,
-            host = dto.host,
-            port = dto.port,
-            database = dto.database,
-            username = dto.username,
+            name = clientDbConfig.name,
+            host = clientDbConfig.host,
+            port = clientDbConfig.port,
+            database = clientDbConfig.database,
+            username = clientDbConfig.username,
             encryptedPassword = encryptedPassword,
-            schema = dto.schema,
-            description = dto.description,
+            schema = clientDbConfig.schema,
+            description = clientDbConfig.description,
             createdAt = LocalDateTime.now(),
             updatedAt = LocalDateTime.now()
         )
 
         return connectionRepository.save(connection)
+    }
+
+    private fun testConnection(): Boolean {
+        return try {
+            val url = "jdbc:postgresql://${clientDbConfig.host}:${clientDbConfig.port}/${clientDbConfig.database}"
+            DriverManager.getConnection(url, clientDbConfig.username, clientDbConfig.password).use { connection ->
+                connection.isValid(5)
+            }
+        } catch (e: SQLException) {
+            logger.error(e) { "Failed to test connection to ${clientDbConfig.host}:${clientDbConfig.port}/${clientDbConfig.database}" }
+            throw DatabaseException("Connection test failed: ${e.message}", e)
+        }
     }
 
     fun getAllConnections(): List<DatabaseConnection> {

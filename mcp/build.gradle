@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     id("org.springframework.boot") version "3.2.0"
@@ -22,6 +23,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-cache")
 
     // Database
     implementation("org.postgresql:postgresql")
@@ -34,6 +36,11 @@ dependencies {
     // WebSocket
     implementation("org.java-websocket:Java-WebSocket:1.5.3")
 
+    // Security Libraries
+    implementation("com.github.jsqlparser:jsqlparser:4.7")
+    implementation("org.owasp.encoder:encoder:1.2.3")
+    implementation("org.springframework.security:spring-security-crypto")
+
     // Utilities
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
@@ -42,11 +49,14 @@ dependencies {
     // Metrics
     implementation("io.micrometer:micrometer-registry-prometheus")
 
-    // Security
-    implementation("org.springframework.security:spring-security-crypto")
-
     // Validation
     implementation("org.hibernate.validator:hibernate-validator")
+
+    // Caching
+    implementation("com.github.ben-manes.caffeine:caffeine")
+
+    // Rate Limiting
+    // implementation("io.github.bucket4j:bucket4j-core:7.6.0")
 
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")

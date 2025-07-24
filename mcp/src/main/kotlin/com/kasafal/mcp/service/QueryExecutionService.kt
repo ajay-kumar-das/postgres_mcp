@@ -1,6 +1,6 @@
 package com.kasafal.mcp.service
 
-import com.kasafal.mcp.exception.DatabaseException
+import com.kasafal.mcp.exception.InvalidSQlQueryException
 import com.kasafal.mcp.model.database.*
 import com.kasafal.mcp.util.SqlValidator
 import mu.KotlinLogging
@@ -18,14 +18,31 @@ class QueryExecutionService(
     fun executeSelectQuery(connectionId: Long, query: String, limit: Int = 100): QueryResult {
         logger.info { "Executing SELECT query on connection $connectionId with limit $limit" }
 
+        // Runtime monitoring: log suspicious queries
+        if (query.contains("pg_", ignoreCase = true) || query.contains("information_schema", ignoreCase = true) || query.contains("union", ignoreCase = true)) {
+            logger.warn { "Suspicious query detected: $query" }
+        }
+
+        // Advanced analysis hooks (Phase 2)
+        runAdvancedAnalysis(query)
+
+        // Future intelligence hooks (Phase 3)
+        runIntelligenceHooks(query, connectionId)
+
         // Validate the query
         val validation = sqlValidator.validateSelectQuery(query)
         if (!validation.isValid) {
-            throw DatabaseException("Invalid query: ${validation.message}")
+            logger.warn { "Alert: Risky sql query - $query"}
+            throw InvalidSQlQueryException("Invalid query: ${validation.message}")
         }
 
         // Add limit if not present
         val limitedQuery = addLimitToQuery(query, limit)
+
+        // Enforce parameterized query usage
+        if (!isQueryParameterized(query)) {
+            throw InvalidSQlQueryException("Query must use parameters to prevent SQL injection.")
+        }
 
         return databaseService.executeQuery(connectionId, limitedQuery)
     }
@@ -33,9 +50,25 @@ class QueryExecutionService(
     fun executeQuery(connectionId: Long, query: String): QueryResult {
         logger.info { "Executing general query on connection $connectionId" }
 
+        // Runtime monitoring: log suspicious queries
+        if (query.contains("pg_", ignoreCase = true) || query.contains("information_schema", ignoreCase = true) || query.contains("union", ignoreCase = true)) {
+            logger.warn { "Suspicious query detected: $query" }
+        }
+
+        // Advanced analysis hooks (Phase 2)
+        runAdvancedAnalysis(query)
+
+        // Future intelligence hooks (Phase 3)
+        runIntelligenceHooks(query, connectionId)
+
         val validation = sqlValidator.validateQuery(query)
         if (!validation.isValid) {
-            throw DatabaseException("Invalid query: ${validation.message}")
+            throw InvalidSQlQueryException("Invalid query: ${validation.message}")
+        }
+
+        // Enforce parameterized query usage
+        if (!isQueryParameterized(query)) {
+            throw InvalidSQlQueryException("Query must use parameters to prevent SQL injection.")
         }
 
         return if (sqlValidator.isSelectQuery(query)) {
@@ -44,13 +77,65 @@ class QueryExecutionService(
             databaseService.executeUpdate(connectionId, query)
         }
     }
+    // --- Security Feature Hooks ---
+    private fun isQueryParameterized(query: String): Boolean {
+        // Basic check: look for parameter placeholders (e.g., ? or $1)
+        return query.contains("?") || Regex("\\$\\d+").containsMatchIn(query)
+    }
+
+    private fun runAdvancedAnalysis(query: String) {
+        // --- Phase 2: Content-based analysis ---
+        if (query.length > 1000) {
+            logger.warn { "Query is unusually long and may be suspicious: $query" }
+        }
+        if (query.contains("--") || query.contains("/*") || query.contains("#")) {
+            logger.warn { "Query contains suspicious comment patterns: $query" }
+        }
+        if (Regex("(?i)select\\s+\\*\\s+from").containsMatchIn(query)) {
+            logger.info { "Query uses SELECT *; recommend column selection for security and performance." }
+        }
+
+        // --- ML-based detection (placeholder) ---
+        // Example: If you have an ML model, call it here
+        // val mlScore = mlModel.score(query)
+        // if (mlScore > 0.8) logger.warn { "ML model flagged query as suspicious: $query" }
+
+        // --- Pattern recognition ---
+        val riskyPatterns = listOf(
+            "sleep(", "benchmark(", "waitfor delay", "extractvalue(", "updatexml(", "load_file(", "outfile"
+        )
+        for (pattern in riskyPatterns) {
+            if (query.contains(pattern, ignoreCase = true)) {
+                logger.warn { "Query contains risky pattern '$pattern': $query" }
+            }
+        }
+    }
+
+    private fun runIntelligenceHooks(query: String, connectionId: Long) {
+        // --- Phase 3: Query learning and optimization ---
+        // Example: Log query for future learning
+        logQueryForLearning(query, connectionId)
+
+        // --- User behavior analysis (placeholder) ---
+        // Example: Track query frequency per user/connection
+        // TODO: Integrate with user session tracking
+
+        // --- Adaptive security thresholds (placeholder) ---
+        // Example: Adjust validation strictness based on recent activity
+        // TODO: Implement adaptive logic
+    }
+
+    private fun logQueryForLearning(query: String, connectionId: Long) {
+        // In production, store queries for analysis and optimization
+        logger.info { "Learning: Query logged for connection $connectionId: $query" }
+    }
 
     fun explainQuery(connectionId: Long, query: String): ExplainResult {
         logger.info { "Explaining query on connection $connectionId" }
 
         val validation = sqlValidator.validateSelectQuery(query)
         if (!validation.isValid) {
-            throw DatabaseException("Invalid query for EXPLAIN: ${validation.message}")
+            throw InvalidSQlQueryException("Invalid query for EXPLAIN: ${validation.message}")
         }
 
         val explainQuery = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) $query"
@@ -60,7 +145,7 @@ class QueryExecutionService(
             parseExplainResult(result)
         } catch (e: SQLException) {
             logger.error(e) { "Failed to explain query: $query" }
-            throw DatabaseException("EXPLAIN failed: ${e.message}", e)
+            throw InvalidSQlQueryException("EXPLAIN failed: ${e.message}", e)
         }
     }
 
@@ -86,7 +171,7 @@ class QueryExecutionService(
     fun findDuplicates(connectionId: Long, tableName: String, columns: List<String>,
                        schemaName: String? = null): List<Map<String, Any?>> {
         if (columns.isEmpty()) {
-            throw DatabaseException("At least one column must be specified for duplicate detection")
+            throw InvalidSQlQueryException("At least one column must be specified for duplicate detection")
         }
 
         val dbConnection = databaseService.getConnection(connectionId)

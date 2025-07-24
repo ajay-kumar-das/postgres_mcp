@@ -19,20 +19,20 @@ class McpServerService(
     private val tools = mapOf(
         "connect_database" to McpTool(
             name = "connect_database",
-            description = "Connect to a PostgreSQL database with the provided credentials",
+            description = "Connect to a PostgreSQL database to get connection id",
             inputSchema = mapOf(
                 "type" to "object",
                 "properties" to mapOf(
-                    "name" to mapOf("type" to "string", "description" to "Connection name"),
+                    "name" to mapOf("type" to "string", "description" to "Connection name")/*,
                     "host" to mapOf("type" to "string", "description" to "Database host"),
                     "port" to mapOf("type" to "integer", "description" to "Database port", "default" to 5432),
                     "database" to mapOf("type" to "string", "description" to "Database name"),
                     "username" to mapOf("type" to "string", "description" to "Database username"),
                     "password" to mapOf("type" to "string", "description" to "Database password"),
                     "schema" to mapOf("type" to "string", "description" to "Default schema", "default" to "public"),
-                    "description" to mapOf("type" to "string", "description" to "Connection description")
+                    "description" to mapOf("type" to "string", "description" to "Connection description")*/
                 ),
-                "required" to listOf("name", "host", "database", "username", "password")
+                "required" to listOf("name")//, "host", "database", "username", "password")
             )
         ),
 
@@ -315,24 +315,13 @@ class McpServerService(
                 )
             )
         } catch (e: Exception) {
-            logger.error(e) { "Error executing tool: $toolName" }
+            logger.error(e.message) { "Error executing tool: $toolName" }
             errorResponse(request.id, "Tool execution failed: ${e.message}")
         }
     }
 
     private fun connectDatabase(arguments: Map<String, Any>): Any {
-        val dto = DatabaseConnectionDto(
-            name = arguments["name"] as? String ?: throw McpException("Missing name"),
-            host = arguments["host"] as? String ?: throw McpException("Missing host"),
-            port = (arguments["port"] as? Number)?.toInt() ?: 5432,
-            database = arguments["database"] as? String ?: throw McpException("Missing database"),
-            username = arguments["username"] as? String ?: throw McpException("Missing username"),
-            password = arguments["password"] as? String ?: throw McpException("Missing password"),
-            schema = arguments["schema"] as? String ?: "public",
-            description = arguments["description"] as? String
-        )
-
-        val connection = databaseService.createConnection(dto)
+        val connection = databaseService.createConnection()
         return mapOf(
             "success" to true,
             "connection_id" to connection.id,

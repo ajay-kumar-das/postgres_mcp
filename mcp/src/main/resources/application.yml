@@ -1,24 +1,15 @@
 server:
-  port: 8080
+  port: 8081
   servlet:
     context-path: /
 
 spring:
+  profiles:
+    active: development
   application:
     name: postgres-mcp-server
-
-  datasource:
-    url: jdbc:postgresql://localhost:5432/mcp_server
-    username: mcp_user
-    password: secure_password_123
+  database:
     driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
-      connection-timeout: 30000
-      idle-timeout: 600000
-      max-lifetime: 1800000
-      leak-detection-threshold: 60000
 
   jpa:
     hibernate:
@@ -59,12 +50,12 @@ management:
 
 logging:
   level:
-    com.yourorg.postgresmcp: INFO
+    com.kasafal.mcp: INFO
     org.springframework.security: WARN
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql.BasicBinder: WARN
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
 
 app:
@@ -84,6 +75,15 @@ app:
   encryption:
     password: bd1184cb5fca4437
     salt: 3df95588aa625a4a
+client:
+  database:
+    name: retail_db
+    host: localhost
+    port: 5432
+    database: mcp_server
+    username: mcp_user
+    password: secure_password_123
+    description: retail db for storing product, customer, order
 
 
 
@@ -93,6 +93,19 @@ spring:
   config:
     activate:
       on-profile: development
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/mcp_server
+    username: mcp_user
+    password: secure_password_123
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
 
 logging:
   level:

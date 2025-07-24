@@ -23,10 +23,8 @@ class CredentialService {
     @PostConstruct
     fun initialize() {
         // Generate salt if not provided
-        val salt = if (encryptionSalt.isBlank()) {
+        val salt = encryptionSalt.ifBlank {
             generateSalt()
-        } else {
-            encryptionSalt
         }
 
         textEncryptor = Encryptors.text(encryptionPassword, salt)
