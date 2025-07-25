@@ -10,16 +10,29 @@ private val logger = KotlinLogging.logger {}
 
 @Service
 class SchemaDiscoveryService(
-    private val databaseService: DatabaseService
+    private val databaseService: DatabaseService,
+    private val sessionTokenService: SessionTokenService
 ) {
 
-    fun discoverDatabaseSchema(connectionId: Long, schemaName: String? = null): DatabaseSchemaInfo {
-        logger.info { "Discovering schema for connection $connectionId, schema: $schemaName" }
-
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+    
+    // ==== Token-based methods ====
+    
+    /**
+     * Discover database schema using session token
+     */
+    fun discoverDatabaseSchemaUsingToken(tokenId: String, schemaName: String? = null): DatabaseSchemaInfo {
+        logger.info { "Discovering schema using token, schema: $schemaName" }
+        
+        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
+        if (!validation.isValid) {
+            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+        }
+        
+        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val tables = discoverTables(connection, targetSchema)
             val views = discoverViews(connection, targetSchema)
             val functions = discoverFunctions(connection, targetSchema)
@@ -34,12 +47,21 @@ class SchemaDiscoveryService(
             )
         }
     }
-
-    fun listTables(connectionId: Long, schemaName: String? = null): List<TableInfo> {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+    
+    /**
+     * List tables using session token
+     */
+    fun listTablesUsingToken(tokenId: String, schemaName: String? = null): List<TableInfo> {
+        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
+        if (!validation.isValid) {
+            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+        }
+        
+        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val sql = """
                 SELECT t.table_name, 
                        t.table_type,
@@ -71,12 +93,21 @@ class SchemaDiscoveryService(
             }
         }
     }
-
-    fun describeTable(connectionId: Long, tableName: String, schemaName: String? = null): TableSchema {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+    
+    /**
+     * Describe table using session token
+     */
+    fun describeTableUsingToken(tokenId: String, tableName: String, schemaName: String? = null): TableSchema {
+        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
+        if (!validation.isValid) {
+            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+        }
+        
+        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val columns = getTableColumns(connection, targetSchema, tableName)
             val primaryKeys = getPrimaryKeys(connection, targetSchema, tableName)
             val foreignKeys = getForeignKeys(connection, targetSchema, tableName)
@@ -96,12 +127,21 @@ class SchemaDiscoveryService(
             )
         }
     }
-
-    fun getTableStatistics(connectionId: Long, tableName: String, schemaName: String? = null): TableStats {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+    
+    /**
+     * Get table statistics using session token
+     */
+    fun getTableStatisticsUsingToken(tokenId: String, tableName: String, schemaName: String? = null): TableStats {
+        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
+        if (!validation.isValid) {
+            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+        }
+        
+        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val rowCount = getTableRowCount(connection, targetSchema, tableName) ?: 0
             val sizeBytes = getTableSize(connection, targetSchema, tableName)
             val columnStats = getColumnStatistics(connection, targetSchema, tableName)

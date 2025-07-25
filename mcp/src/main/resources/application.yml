@@ -4,27 +4,8 @@ server:
     context-path: /
 
 spring:
-  profiles:
-    active: development
   application:
     name: postgres-mcp-server
-  database:
-    driver-class-name: org.postgresql.Driver
-
-  jpa:
-    hibernate:
-      ddl-auto: update
-    show-sql: false
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
-        use_sql_comments: false
-        generate_statistics: false
-        jdbc:
-          batch_size: 25
-          order_inserts: true
-          order_updates: true
 
   jackson:
     serialization:
@@ -50,10 +31,11 @@ management:
 
 logging:
   level:
-    com.kasafal.mcp: INFO
+    com.kasafal.mcp: DEBUG
     org.springframework.security: WARN
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql.BasicBinder: WARN
+    org.springframework.web: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
@@ -73,77 +55,14 @@ app:
     enable-detailed-errors: false
 
   encryption:
-    password: bd1184cb5fca4437
-    salt: 3df95588aa625a4a
-client:
-  database:
-    name: retail_db
-    host: localhost
-    port: 5432
-    database: mcp_server
-    username: mcp_user
-    password: secure_password_123
-    description: retail db for storing product, customer, order
+    password: ${ENCRYPTION_PASSWORD:bd1184cb5fca4437}
+    salt: ${ENCRYPTION_SALT:3df95588aa625a4a}
+  
+  security:
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080}
 
-
-
----
-
-spring:
-  config:
-    activate:
-      on-profile: development
-
-  datasource:
-    url: jdbc:postgresql://localhost:5432/mcp_server
-    username: mcp_user
-    password: secure_password_123
-    driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
-      connection-timeout: 30000
-      idle-timeout: 600000
-      max-lifetime: 1800000
-      leak-detection-threshold: 60000
-
-logging:
-  level:
-    com.yourorg.postgresmcp: DEBUG
-    org.springframework.security: DEBUG
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-
-app:
-  database:
-    enable-query-logging: true
-  mcp:
-    enable-detailed-errors: true
-
----
-
-spring:
-  config:
-    activate:
-      on-profile: production
-
-  datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:mcp_server}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-    hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
-
-logging:
-  level:
-    com.yourorg.postgresmcp: INFO
-    org.springframework.security: WARN
-    org.hibernate.SQL: WARN
-
-app:
-  database:
-    max-connections: 20
-    enable-query-logging: false
-  mcp:
-    enable-detailed-errors: false
+# Session token cleanup configuration
+  session:
+    cleanup-interval-minutes: 5
+    default-expiration-minutes: 60
+    max-concurrent-tokens: 1000

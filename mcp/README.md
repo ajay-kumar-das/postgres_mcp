@@ -74,47 +74,53 @@ curl -X POST http://localhost:8080/mcp \
   }'
 ```
 
-## MCP Tools Available
+## MCP Tools Available (Token-Based)
 
-### Database Management
-- **`connect_database`** - Connect to a PostgreSQL database
-- **`list_connections`** - List all configured connections
-- **`test_connection`** - Test database connectivity
+### Session Token Management
+- **Session Tokens**: All operations require secure session tokens instead of connection IDs
+- **Permissions**: Fine-grained control over allowed operations per token
+- **Expiration**: Automatic token expiration with configurable timeouts
+- **Audit Trail**: Complete logging of token usage and operations
 
-### Schema Discovery
-- **`get_database_schema`** - Get complete schema information
-- **`list_tables`** - List all tables in a schema
-- **`describe_table`** - Get detailed table structure
+### Core Database Tools
+- **`execute_query`** - Execute SELECT queries safely with token authentication
+- **`discover_schema`** - Get complete database schema information
+- **`list_tables`** - List all tables in a specific schema
+- **`describe_table`** - Get detailed table structure and metadata
+- **`sample_table_data`** - Get random sample data from tables
 
-### Query Execution
-- **`execute_select`** - Execute SELECT queries safely
-- **`sample_data`** - Get random sample data from tables
-- **`explain_query`** - Get query execution plans
-- **`validate_sql`** - Validate SQL syntax
-
-### Data Analysis
-- **`get_table_stats`** - Get table statistics and metrics
-- **`find_duplicates`** - Identify duplicate records
+### Data Analysis Tools
 - **`analyze_data_quality`** - Comprehensive data quality analysis
+- **`find_duplicates`** - Identify duplicate records in tables
+- **`validate_sql`** - Validate SQL syntax before execution
+- **`explain_query`** - Get query execution plans and performance insights
 
-## Usage Examples
+## Token-Based Usage Examples
 
-### Connect to Database
+**Important**: All database operations now require session tokens for enhanced security. The AI never has direct access to database credentials.
+
+### New Security Features
+- ✅ **Token-Free Initialization**: Claude can initialize and list tools without any credentials
+- ✅ **Smart Token Redirect**: When database access is needed, Claude automatically redirects users to a secure token generation UI
+- ✅ **No Config Credentials**: No database credentials are stored in Claude's configuration
+- ✅ **Seamless UX**: Users generate tokens via a user-friendly web interface when needed
+
+### Create Session Token First
 ```json
 {
   "jsonrpc": "2.0",
   "id": "1",
-  "method": "tools/call",
-  "params": {
-    "name": "connect_database",
-    "arguments": {
-      "name": "My Database",
-      "host": "localhost",
-      "port": 5432,
-      "database": "mydb",
-      "username": "user",
-      "password": "password"
-    }
+  "method": "POST",
+  "url": "/api/session/tokens",
+  "body": {
+    "name": "Analysis Session",
+    "host": "localhost",
+    "port": 5432,
+    "database": "mydb",
+    "username": "user",
+    "password": "password",
+    "expirationMinutes": 60,
+    "allowedOperations": ["SCHEMA_DISCOVERY", "SELECT_QUERIES"]
   }
 }
 ```
@@ -126,9 +132,9 @@ curl -X POST http://localhost:8080/mcp \
   "id": "2",
   "method": "tools/call",
   "params": {
-    "name": "get_database_schema",
+    "name": "discover_schema",
     "arguments": {
-      "connection_id": 1
+      "token_id": "tok_a1b2c3d4-e5f6-7890-abcd-ef1234567890"
     }
   }
 }
@@ -141,9 +147,9 @@ curl -X POST http://localhost:8080/mcp \
   "id": "3",
   "method": "tools/call",
   "params": {
-    "name": "execute_select",
+    "name": "execute_query",
     "arguments": {
-      "connection_id": 1,
+      "token_id": "tok_a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "query": "SELECT * FROM users WHERE active = true",
       "limit": 10
     }
@@ -155,16 +161,17 @@ curl -X POST http://localhost:8080/mcp \
 
 The server provides rich contextual prompts that give Claude complete understanding of your database:
 
-### Database Analysis Prompt
+### Database Analysis with Token
 ```json
 {
   "jsonrpc": "2.0",
   "id": "4",
-  "method": "prompts/get",
+  "method": "tools/call",
   "params": {
-    "name": "database_analysis",
+    "name": "analyze_data_quality",
     "arguments": {
-      "connection_id": 1
+      "token_id": "tok_a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "table_name": "users"
     }
   }
 }
@@ -280,11 +287,13 @@ Example Kubernetes manifests available in `k8s/` directory:
 - `POST /mcp` - Main MCP protocol endpoint
 - `GET /mcp/health` - Health check
 
-### REST API Endpoints
-- `GET /api/connections` - List database connections
-- `POST /api/connections` - Create new connection
-- `DELETE /api/connections/{id}` - Remove connection
-- `POST /api/connections/{id}/test` - Test connection
+### Session Token API Endpoints
+- `POST /api/session/tokens` - Create new session token
+- `GET /api/session/tokens/{tokenId}/stats` - Get token usage statistics
+- `DELETE /api/session/tokens/{tokenId}` - Invalidate specific token
+- `DELETE /api/session/tokens` - Emergency: Invalidate all tokens
+- `GET /api/session/stats` - Get system token statistics
+- `GET /api/session/health` - Session token system health check
 
 ### Monitoring Endpoints
 - `GET /actuator/health` - Application health
