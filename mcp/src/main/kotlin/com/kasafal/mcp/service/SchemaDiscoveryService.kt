@@ -1,34 +1,36 @@
 package com.kasafal.mcp.service
 
 import com.kasafal.mcp.exception.DatabaseException
+import com.kasafal.mcp.exception.InvalidSQlQueryException
 import com.kasafal.mcp.model.database.*
+import com.kasafal.mcp.model.session.DatabaseOperation
 import mu.KotlinLogging
 import org.springframework.stereotype.Service
-import java.sql.ResultSet
 
 private val logger = KotlinLogging.logger {}
 
 @Service
 class SchemaDiscoveryService(
     private val databaseService: DatabaseService,
-    private val sessionTokenService: SessionTokenService
+    private val sessionAuthenticationService: SessionAuthenticationService
 ) {
 
     
-    // ==== Token-based methods ====
+    // ==== Session-based methods ====
     
     /**
-     * Discover database schema using session token
+     * Discover database schema using session
      */
-    fun discoverDatabaseSchemaUsingToken(tokenId: String, schemaName: String? = null): DatabaseSchemaInfo {
-        logger.info { "Discovering schema using token, schema: $schemaName" }
+    fun discoverDatabaseSchemaUsingSession(sessionId: String, schemaName: String? = null): DatabaseSchemaInfo {
+        logger.info { "Discovering schema using session, schema: $schemaName" }
         
-        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
-        if (!validation.isValid) {
-            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
+
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-        
-        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
         val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         
@@ -49,15 +51,16 @@ class SchemaDiscoveryService(
     }
     
     /**
-     * List tables using session token
+     * List tables using session
      */
-    fun listTablesUsingToken(tokenId: String, schemaName: String? = null): List<TableInfo> {
-        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
-        if (!validation.isValid) {
-            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+    fun listTablesUsingSession(sessionId: String, schemaName: String? = null): List<TableInfo> {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
+
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-        
-        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
         val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         
@@ -95,15 +98,16 @@ class SchemaDiscoveryService(
     }
     
     /**
-     * Describe table using session token
+     * Describe table using session
      */
-    fun describeTableUsingToken(tokenId: String, tableName: String, schemaName: String? = null): TableSchema {
-        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
-        if (!validation.isValid) {
-            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+    fun describeTableUsingSession(sessionId: String, tableName: String, schemaName: String? = null): TableSchema {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
+
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-        
-        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
         val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         
@@ -129,15 +133,16 @@ class SchemaDiscoveryService(
     }
     
     /**
-     * Get table statistics using session token
+     * Get table statistics using session
      */
-    fun getTableStatisticsUsingToken(tokenId: String, tableName: String, schemaName: String? = null): TableStats {
-        val validation = sessionTokenService.validateAndUseToken(tokenId, com.kasafal.mcp.model.session.DatabaseOperation.SCHEMA_DISCOVERY)
-        if (!validation.isValid) {
-            throw DatabaseException("Token validation failed: ${validation.errorMessage}")
+    fun getTableStatisticsUsingSession(sessionId: String, tableName: String, schemaName: String? = null): TableStats {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
+
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-        
-        val connectionInfo = validation.connectionInfo ?: throw DatabaseException("No connection info found for token")
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
         val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         

@@ -25,12 +25,12 @@ class SecurityConfig {
         http
             .csrf { csrf ->
                 csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-                    .ignoringRequestMatchers("/mcp/**", "/api/**", "/token-ui", "/actuator/health")
+                    .ignoringRequestMatchers("/mcp/**", "/api/**", "/api/auth/**", "/token-ui", "/actuator/health")
             }
             .cors { cors -> cors.configurationSource(corsConfigurationSource()) }
             .authorizeHttpRequests { requests ->
                 requests
-                    .requestMatchers("/mcp/**", "/api/**", "/token-ui", "/actuator/**").permitAll()
+                    .requestMatchers("/mcp/**", "/api/**", "/api/auth/**", "/token-ui", "/actuator/**").permitAll()
                     .anyRequest().authenticated()
             }
             .httpBasic { }

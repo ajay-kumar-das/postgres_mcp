@@ -6,14 +6,14 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 
 /**
- * Controller for serving the token generation UI.
- * This provides a simple web interface for users to generate database session tokens.
+ * Controller for serving the session authentication UI.
+ * This provides a simple web interface for users to create and manage database sessions.
  */
 @Controller
-class TokenUiController {
+class SessionUiController {
 
-    @GetMapping("/token-ui")
-    fun tokenGenerationUI(
+    @GetMapping("/session-ui")
+    fun sessionAuthenticationUI(
         @RequestParam(required = false) purpose: String?,
         @RequestParam(required = false) operations: String?,
         model: Model
@@ -21,6 +21,6 @@ class TokenUiController {
         model.addAttribute("purpose", purpose ?: "Database access")
         model.addAttribute("requestedOperations", operations?.split(",") ?: listOf("SELECT_QUERIES", "SCHEMA_DISCOVERY"))
         
-        return "token-ui"
+        return "session-ui"
     }
 }

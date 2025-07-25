@@ -54,9 +54,6 @@ dependencies {
     // Caching
     implementation("com.github.ben-manes.caffeine:caffeine")
 
-    // Rate Limiting
-    // implementation("io.github.bucket4j:bucket4j-core:7.6.0")
-
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.testcontainers:junit-jupiter")

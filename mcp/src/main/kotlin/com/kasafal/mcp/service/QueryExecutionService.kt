@@ -3,6 +3,7 @@ package com.kasafal.mcp.service
 import com.kasafal.mcp.exception.InvalidSQlQueryException
 import com.kasafal.mcp.model.database.*
 import com.kasafal.mcp.model.session.DatabaseOperation
+import com.kasafal.mcp.model.session.SessionAuth
 import com.kasafal.mcp.util.SqlValidator
 import mu.KotlinLogging
 import org.springframework.stereotype.Service
@@ -15,15 +16,15 @@ class QueryExecutionService(
     private val databaseService: DatabaseService,
     private val sqlValidator: SqlValidator,
     private val parameterizedQueryService: ParameterizedQueryService,
-    private val sessionTokenService: SessionTokenService,
+    private val sessionAuthenticationService: SessionAuthenticationService,
     private val schemaDiscoveryService: SchemaDiscoveryService
 ) {
 
     /**
-     * Execute SELECT query using session token (secure method)
+     * Execute SELECT query using session (secure method)
      */
-    fun executeSelectUsingToken(tokenId: String, query: String, limit: Int = 100): QueryResult {
-        logger.info { "Executing SELECT query using token with limit $limit" }
+    fun executeSelectUsingSession(sessionId: String, query: String, limit: Int = 100): QueryResult {
+        logger.info { "Executing SELECT query using session with limit $limit" }
 
         // Runtime monitoring: log suspicious queries
         if (query.contains("pg_", ignoreCase = true) || query.contains("information_schema", ignoreCase = true) || query.contains("union", ignoreCase = true)) {
@@ -43,19 +44,21 @@ class QueryExecutionService(
         // Add limit if not present
         val limitedQuery = addLimitToQuery(query, limit)
 
-        return executeQueryUsingToken(tokenId, limitedQuery, DatabaseOperation.SELECT_QUERIES)
+        return executeQueryUsingSession(sessionId, limitedQuery, DatabaseOperation.SELECT_QUERIES)
     }
 
-    fun executeQueryUsingToken(tokenId: String, query: String, requiredOperation: DatabaseOperation): QueryResult {
-        val validation = sessionTokenService.validateAndUseToken(tokenId, requiredOperation)
-        if (!validation.isValid) {
-            throw InvalidSQlQueryException("Token validation failed: ${validation.errorMessage}")
+    fun executeQueryUsingSession(sessionId: String, query: String, requiredOperation: DatabaseOperation): QueryResult {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, requiredOperation)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
         
-        val connectionInfo = validation.connectionInfo ?: throw InvalidSQlQueryException("No connection info found for token")
         val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
         
-        logger.info { "Executing query using token on database: ${connectionInfo.name}" }
+        logger.info { "Executing query using session on database: ${connectionInfo.name}" }
 
         val validationResponse = sqlValidator.validateQuery(query)
         if (!validationResponse.isValid) {
@@ -111,8 +114,8 @@ class QueryExecutionService(
     }
 
 
-    fun explainQueryUsingToken(tokenId: String, query: String): ExplainResult {
-        logger.info { "Explaining query using token" }
+    fun explainQueryUsingSession(sessionId: String, query: String): ExplainResult {
+        logger.info { "Explaining query using session" }
 
         val validation = sqlValidator.validateSelectQuery(query)
         if (!validation.isValid) {
@@ -122,7 +125,7 @@ class QueryExecutionService(
         val explainQuery = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) $query"
 
         return try {
-            val result = executeQueryUsingToken(tokenId, explainQuery, DatabaseOperation.SELECT_QUERIES)
+            val result = executeQueryUsingSession(sessionId, explainQuery, DatabaseOperation.SELECT_QUERIES)
             parseExplainResult(result)
         } catch (e: SQLException) {
             logger.error(e) { "Failed to explain query: $query" }
@@ -135,14 +138,15 @@ class QueryExecutionService(
         return sqlValidator.validateQuery(query)
     }
 
-    fun sampleTableDataUsingToken(tokenId: String, tableName: String, schemaName: String? = null,
+    fun sampleTableDataUsingSession(sessionId: String, tableName: String, schemaName: String? = null,
                         sampleSize: Int = 10): List<Map<String, Any?>> {
-        val validation = sessionTokenService.validateAndUseToken(tokenId, DatabaseOperation.SELECT_QUERIES)
-        if (!validation.isValid) {
-            throw InvalidSQlQueryException("Token validation failed: ${validation.errorMessage}")
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SELECT_QUERIES)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-        
-        val connectionInfo = validation.connectionInfo ?: throw InvalidSQlQueryException("No connection info found for token")
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
         val targetSchema = schemaName ?: connectionInfo.schema
         val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
         
@@ -153,14 +157,15 @@ class QueryExecutionService(
     }
 
 
-    fun findDuplicatesUsingToken(tokenId: String, tableName: String, columns: List<String>,
+    fun findDuplicatesUsingSession(sessionId: String, tableName: String, columns: List<String>,
                        schemaName: String? = null): List<Map<String, Any?>> {
-        val validation = sessionTokenService.validateAndUseToken(tokenId, DatabaseOperation.SELECT_QUERIES)
-        if (!validation.isValid) {
-            throw InvalidSQlQueryException("Token validation failed: ${validation.errorMessage}")
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SELECT_QUERIES)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-        
-        val connectionInfo = validation.connectionInfo ?: throw InvalidSQlQueryException("No connection info found for token")
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
         val targetSchema = schemaName ?: connectionInfo.schema
         val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
         
@@ -171,18 +176,19 @@ class QueryExecutionService(
     }
 
 
-    fun analyzeDataQualityUsingToken(tokenId: String, tableName: String, schemaName: String? = null): DataQualityReport {
-        val validation = sessionTokenService.validateAndUseToken(tokenId, DatabaseOperation.SELECT_QUERIES)
-        if (!validation.isValid) {
-            throw InvalidSQlQueryException("Token validation failed: ${validation.errorMessage}")
+    fun analyzeDataQualityUsingSession(sessionId: String, tableName: String, schemaName: String? = null): DataQualityReport {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SELECT_QUERIES)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-        
-        val connectionInfo = validation.connectionInfo ?: throw InvalidSQlQueryException("No connection info found for token")
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
         val targetSchema = schemaName ?: connectionInfo.schema
 
         // Get total row count
         val totalRowsQuery = "SELECT COUNT(*) as total_rows FROM \"$targetSchema\".\"$tableName\""
-        val totalRowsResult = executeQueryUsingToken(tokenId, totalRowsQuery, DatabaseOperation.SELECT_QUERIES)
+        val totalRowsResult = executeQueryUsingSession(sessionId, totalRowsQuery, DatabaseOperation.SELECT_QUERIES)
         val totalRows = (totalRowsResult.rows.firstOrNull()?.get("total_rows") as? Number)?.toLong() ?: 0L
 
         if (totalRows == 0L) {
@@ -190,20 +196,20 @@ class QueryExecutionService(
         }
 
         // Get table schema to analyze each column
-        val tableSchema = schemaDiscoveryService.describeTableUsingToken(tokenId, tableName, targetSchema)
+        val tableSchema = schemaDiscoveryService.describeTableUsingSession(sessionId, tableName, targetSchema)
 
         val issues = mutableListOf<DataQualityIssue>()
 
         // Analyze each column for data quality issues
         for (column in tableSchema.columns) {
-            issues.addAll(analyzeColumnQualityUsingToken(tokenId, targetSchema, tableName, column, totalRows))
+            issues.addAll(analyzeColumnQualityUsingSession(sessionId, targetSchema, tableName, column, totalRows))
         }
 
         return DataQualityReport(tableName, totalRows, issues)
     }
 
 
-    private fun analyzeColumnQualityUsingToken(tokenId: String, schemaName: String, tableName: String,
+    private fun analyzeColumnQualityUsingSession(sessionId: String, schemaName: String, tableName: String,
                                      column: ColumnInfo, totalRows: Long): List<DataQualityIssue> {
         val issues = mutableListOf<DataQualityIssue>()
 
@@ -216,7 +222,7 @@ class QueryExecutionService(
                     WHERE "${column.name}" IS NULL
                 """.trimIndent()
 
-                val nullResult = executeQueryUsingToken(tokenId, nullQuery, DatabaseOperation.SELECT_QUERIES)
+                val nullResult = executeQueryUsingSession(sessionId, nullQuery, DatabaseOperation.SELECT_QUERIES)
                 val nullCount = (nullResult.rows.firstOrNull()?.get("null_count") as? Number)?.toLong() ?: 0L
 
                 if (nullCount > 0) {
@@ -239,7 +245,7 @@ class QueryExecutionService(
                     WHERE "${column.name}" = '' OR "${column.name}" IS NULL
                 """.trimIndent()
 
-                val emptyResult = executeQueryUsingToken(tokenId, emptyQuery, DatabaseOperation.SELECT_QUERIES)
+                val emptyResult = executeQueryUsingSession(sessionId, emptyQuery, DatabaseOperation.SELECT_QUERIES)
                 val emptyCount = (emptyResult.rows.firstOrNull()?.get("empty_count") as? Number)?.toLong() ?: 0L
 
                 if (emptyCount > 0) {
@@ -262,7 +268,7 @@ class QueryExecutionService(
                     WHERE "${column.name}" IS NOT NULL
                 """.trimIndent()
 
-                val duplicateResult = executeQueryUsingToken(tokenId, duplicateQuery, DatabaseOperation.SELECT_QUERIES)
+                val duplicateResult = executeQueryUsingSession(sessionId, duplicateQuery, DatabaseOperation.SELECT_QUERIES)
                 val duplicateCount = (duplicateResult.rows.firstOrNull()?.get("duplicate_count") as? Number)?.toLong() ?: 0L
 
                 if (duplicateCount > 0) {
