@@ -2,6 +2,12 @@ server:
   port: 8081
   servlet:
     context-path: /
+tomcat:
+  threads:
+    max: 100          # Support 100 concurrent AI requests\n
+    min-spare: 10     # Always keep 10 threads ready\n
+    accept-count: 200   # Queue up to 200 requests when all threads busy\n
+    max-connections: 8192  # Maximum concurrent connections
 
 spring:
   application:

@@ -2,6 +2,8 @@ package com.kasafal.mcp.model.session
 
 import java.time.LocalDateTime
 import java.util.*
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Authentication status for a session
@@ -27,38 +29,86 @@ enum class DatabaseOperation {
 }
 
 /**
- * Session-based authentication information
+ * Thread-safe session-based authentication information
  */
-data class SessionAuth(
+class SessionAuth(
     val sessionId: String = UUID.randomUUID().toString(),
-    var status: AuthStatus = AuthStatus.PENDING,
+    initialStatus: AuthStatus = AuthStatus.PENDING,
     val createdAt: LocalDateTime = LocalDateTime.now(),
-    var expiresAt: LocalDateTime = LocalDateTime.now().plusHours(2), // 2 hour default
-    var authenticatedAt: LocalDateTime? = null,
-    var connectionInfo: DatabaseConnectionInfo? = null,
     val allowedOperations: Set<DatabaseOperation> = setOf(
         DatabaseOperation.SCHEMA_DISCOVERY,
         DatabaseOperation.TABLE_SAMPLING,
         DatabaseOperation.SELECT_QUERIES
     ),
     val purpose: String = "database_access",
-    var usageCount: Int = 0,
     val maxUsages: Int = 100
 ) {
+    // Thread-safe atomic fields
+    private val _status = AtomicReference(initialStatus)
+    private val _expiresAt = AtomicReference(LocalDateTime.now().plusHours(2))
+    private val _authenticatedAt = AtomicReference<LocalDateTime?>(null)
+    private val _connectionInfo = AtomicReference<DatabaseConnectionInfo?>(null)
+    private val _usageCount = AtomicInteger(0)
+    
+    // Thread-safe accessors
+    var status: AuthStatus
+        get() = _status.get()
+        set(value) { _status.set(value) }
+    
+    var expiresAt: LocalDateTime
+        get() = _expiresAt.get()
+        set(value) { _expiresAt.set(value) }
+    
+    var authenticatedAt: LocalDateTime?
+        get() = _authenticatedAt.get()
+        set(value) { _authenticatedAt.set(value) }
+    
+    var connectionInfo: DatabaseConnectionInfo?
+        get() = _connectionInfo.get()
+        set(value) { _connectionInfo.set(value) }
+    
+    val usageCount: Int
+        get() = _usageCount.get()
     /**
-     * Check if the session is still valid
+     * Atomically increment usage count and return new value
      */
-    fun isValid(): Boolean {
-        return status == AuthStatus.AUTHENTICATED &&
-               LocalDateTime.now().isBefore(expiresAt) &&
-               usageCount < maxUsages
+    fun incrementUsage(): Int {
+        return _usageCount.incrementAndGet()
     }
     
     /**
-     * Check if session has expired
+     * Atomically check and set status from expected to new value
+     * Returns true if successful, false if current status != expected
+     */
+    fun compareAndSetStatus(expected: AuthStatus, new: AuthStatus): Boolean {
+        return _status.compareAndSet(expected, new)
+    }
+    
+    /**
+     * Check if the session is still valid (thread-safe snapshot)
+     */
+    fun isValid(): Boolean {
+        val currentStatus = status
+        val currentExpiry = expiresAt
+        val currentUsage = usageCount
+        
+        return currentStatus == AuthStatus.AUTHENTICATED &&
+               LocalDateTime.now().isBefore(currentExpiry) &&
+               currentUsage < maxUsages
+    }
+    
+    /**
+     * Check if session has expired (thread-safe)
      */
     fun isExpired(): Boolean {
         return LocalDateTime.now().isAfter(expiresAt)
+    }
+    
+    /**
+     * Atomically check if usage limit would be exceeded after increment
+     */
+    fun wouldExceedUsageLimit(): Boolean {
+        return _usageCount.get() >= maxUsages
     }
 }
 
@@ -113,11 +163,12 @@ data class SessionAuthResponse(
 data class SessionValidationResult(
     val isValid: Boolean,
     val sessionAuth: SessionAuth? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val newUsageCount: Int? = null  // Include new usage count for tracking
 )
 
 /**
- * Session usage statistics
+ * Session usage statistics (immutable snapshot)
  */
 data class SessionUsageStats(
     val sessionId: String,
@@ -129,4 +180,23 @@ data class SessionUsageStats(
     val expiresAt: LocalDateTime,
     val allowedOperations: Set<DatabaseOperation>,
     val authenticatedAt: LocalDateTime?
-)
+) {
+    companion object {
+        /**
+         * Create a thread-safe snapshot of SessionAuth
+         */
+        fun fromSession(session: SessionAuth): SessionUsageStats {
+            return SessionUsageStats(
+                sessionId = session.sessionId,
+                status = session.status,
+                usageCount = session.usageCount,
+                maxUsages = session.maxUsages,
+                remainingUsages = session.maxUsages - session.usageCount,
+                createdAt = session.createdAt,
+                expiresAt = session.expiresAt,
+                allowedOperations = session.allowedOperations,
+                authenticatedAt = session.authenticatedAt
+            )
+        }
+    }
+}

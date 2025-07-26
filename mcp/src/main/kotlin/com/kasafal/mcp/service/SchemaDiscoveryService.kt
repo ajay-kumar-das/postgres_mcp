@@ -31,7 +31,7 @@ class SchemaDiscoveryService(
         }
         val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
             ?: throw DatabaseException("No connection info found for session")
-        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         
         return dataSource.connection.use { connection ->
@@ -61,7 +61,7 @@ class SchemaDiscoveryService(
         }
         val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
             ?: throw DatabaseException("No connection info found for session")
-        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         
         return dataSource.connection.use { connection ->
@@ -108,7 +108,7 @@ class SchemaDiscoveryService(
         }
         val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
             ?: throw DatabaseException("No connection info found for session")
-        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         
         return dataSource.connection.use { connection ->
@@ -143,7 +143,7 @@ class SchemaDiscoveryService(
         }
         val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
             ?: throw DatabaseException("No connection info found for session")
-        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
         val targetSchema = schemaName ?: connectionInfo.schema
         
         return dataSource.connection.use { connection ->

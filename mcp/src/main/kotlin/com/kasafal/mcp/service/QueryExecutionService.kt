@@ -56,7 +56,7 @@ class QueryExecutionService(
         val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
             ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
         
-        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
         
         logger.info { "Executing query using session on database: ${connectionInfo.name}" }
 
@@ -72,7 +72,7 @@ class QueryExecutionService(
                 dataSource, query, emptyMap(), connectionInfo.queryTimeoutSeconds
             )
         } else {
-            logger.debug { "Using direct query execution for non-parameterized query" }
+            logger.debug { "Using direct query execution" }
             databaseService.executeQuery(
                 dataSource, query, connectionInfo.queryTimeoutSeconds
             )
@@ -148,7 +148,7 @@ class QueryExecutionService(
         val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
             ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
         val targetSchema = schemaName ?: connectionInfo.schema
-        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
         
         val result = parameterizedQueryService.executeSampleQuery(
             dataSource, targetSchema, tableName, sampleSize, connectionInfo.queryTimeoutSeconds
@@ -167,7 +167,7 @@ class QueryExecutionService(
         val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
             ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
         val targetSchema = schemaName ?: connectionInfo.schema
-        val dataSource = databaseService.getDataSourceByInfo(connectionInfo)
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
         
         val result = parameterizedQueryService.executeDuplicateQuery(
             dataSource, targetSchema, tableName, columns, connectionInfo.queryTimeoutSeconds

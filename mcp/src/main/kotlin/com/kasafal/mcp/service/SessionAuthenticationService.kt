@@ -7,9 +7,6 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.locks.ReentrantReadWriteLock
-import kotlin.concurrent.read
-import kotlin.concurrent.write
 
 private val logger = KotlinLogging.logger {}
 
@@ -23,9 +20,8 @@ class SessionAuthenticationService(
     private val databaseService: DatabaseService
 ) {
     
-    // Thread-safe in-memory storage for sessions
+    // Thread-safe in-memory storage for sessions - ConcurrentHashMap provides lock-free operations
     private val activeSessions = ConcurrentHashMap<String, SessionAuth>()
-    private val lock = ReentrantReadWriteLock()
     private val sessionTimeout = 2 * 60 * 60 * 1000L // 2 hours in milliseconds
     
     /**
@@ -43,9 +39,7 @@ class SessionAuthenticationService(
             )
         )
         
-        lock.write {
-            activeSessions[sessionAuth.sessionId] = sessionAuth
-        }
+        activeSessions[sessionAuth.sessionId] = sessionAuth
         
         logger.info { "Created new session: ${sessionAuth.sessionId} for purpose: $purpose" }
         
@@ -64,142 +58,161 @@ class SessionAuthenticationService(
     fun authenticateSession(request: AuthenticateSessionRequest): SessionAuthResponse {
         logger.info { "Authenticating session: ${request.sessionId}" }
         
-        return lock.write {
-            val session = activeSessions[request.sessionId]
-                ?: throw McpException("Session not found: ${request.sessionId}")
-            
-            if (session.isExpired()) {
-                session.status = AuthStatus.EXPIRED
-                throw McpException("Session has expired: ${request.sessionId}")
-            }
-            
-            if (session.status != AuthStatus.PENDING) {
-                throw McpException("Session is not in pending state: ${request.sessionId}")
-            }
-            
-            // Test database connection before storing credentials
-            testDatabaseConnection(request)
-            
-            // Encrypt password and create connection info
-            val encryptedPassword = credentialService.encrypt(request.password)
-            val connectionInfo = DatabaseConnectionInfo(
-                name = request.name,
-                host = request.host,
-                port = request.port,
-                database = request.database,
-                username = request.username,
-                encryptedPassword = encryptedPassword,
-                schema = request.schema,
-                rateLimitPerSecond = request.rateLimitPerSecond,
-                description = request.description
-            )
-            
-            // Update session with authentication info
-            session.status = AuthStatus.AUTHENTICATED
-            session.authenticatedAt = LocalDateTime.now()
-            session.connectionInfo = connectionInfo
-            
-            logger.info { "Session authenticated successfully: ${request.sessionId}" }
-            
-            SessionAuthResponse(
-                sessionId = session.sessionId,
-                status = session.status,
-                expiresAt = session.expiresAt,
-                allowedOperations = session.allowedOperations,
-                connectionName = request.name,
-                message = "Authentication successful. Session is ready for database operations."
-            )
+        val session = activeSessions[request.sessionId]
+            ?: throw McpException("Session not found: ${request.sessionId}")
+        
+        if (session.isExpired()) {
+            session.status = AuthStatus.EXPIRED
+            activeSessions.remove(request.sessionId)
+            throw McpException("Session has expired: ${request.sessionId}")
         }
+        
+        if (session.status != AuthStatus.PENDING) {
+            throw McpException("Session is not in pending state: ${request.sessionId}")
+        }
+        
+        // Test database connection before storing credentials
+        testDatabaseConnection(request)
+        
+        // Encrypt password and create connection info
+        val encryptedPassword = credentialService.encrypt(request.password)
+        val connectionInfo = DatabaseConnectionInfo(
+            name = request.name,
+            host = request.host,
+            port = request.port,
+            database = request.database,
+            username = request.username,
+            encryptedPassword = encryptedPassword,
+            schema = request.schema,
+            rateLimitPerSecond = request.rateLimitPerSecond,
+            description = request.description
+        )
+        
+        // Update session with authentication info atomically
+        session.status = AuthStatus.AUTHENTICATED
+        session.authenticatedAt = LocalDateTime.now()
+        session.connectionInfo = connectionInfo
+        
+        logger.info { "Session authenticated successfully: ${request.sessionId}" }
+        
+        return SessionAuthResponse(
+            sessionId = session.sessionId,
+            status = session.status,
+            expiresAt = session.expiresAt,
+            allowedOperations = session.allowedOperations,
+            connectionName = request.name,
+            message = "Authentication successful. Session is ready for database operations."
+        )
     }
     
     /**
      * Validate and use a session for database operations
      */
     fun validateAndUseSession(sessionId: String, requiredOperation: DatabaseOperation): SessionValidationResult {
-        return lock.write {
-            val session = activeSessions[sessionId]
-            
-            if (session == null) {
-                logger.warn { "Session not found: $sessionId" }
-                return@write SessionValidationResult(
-                    isValid = false,
-                    errorMessage = "Session not found or has been invalidated"
-                )
-            }
-            
-            if (session.isExpired()) {
-                logger.warn { "Session has expired: $sessionId" }
-                session.status = AuthStatus.EXPIRED
-                activeSessions.remove(sessionId)
-                return@write SessionValidationResult(
-                    isValid = false,
-                    errorMessage = "Session has expired"
-                )
-            }
-            
-            if (session.status != AuthStatus.AUTHENTICATED) {
-                logger.warn { "Session is not authenticated: $sessionId (status: ${session.status})" }
-                return@write SessionValidationResult(
-                    isValid = false,
-                    errorMessage = "Session is not authenticated. Please complete authentication first."
-                )
-            }
-            
-            if (!session.allowedOperations.contains(requiredOperation)) {
-                logger.warn { "Operation $requiredOperation not allowed for session: $sessionId" }
-                return@write SessionValidationResult(
-                    isValid = false,
-                    errorMessage = "Operation $requiredOperation is not allowed for this session"
-                )
-            }
-            
-            if (session.usageCount >= session.maxUsages) {
-                logger.warn { "Session usage limit exceeded: $sessionId" }
-                session.status = AuthStatus.EXPIRED
-                activeSessions.remove(sessionId)
-                return@write SessionValidationResult(
-                    isValid = false,
-                    errorMessage = "Session usage limit exceeded"
-                )
-            }
-            
-            // Increment usage count
-            session.usageCount++
-            
-            logger.debug { "Session $sessionId used successfully (usage: ${session.usageCount}/${session.maxUsages})" }
-            
-            SessionValidationResult(
-                isValid = true,
-                sessionAuth = session
+        val session = activeSessions[sessionId]
+        
+        if (session == null) {
+            logger.warn { "Session not found: $sessionId" }
+            return SessionValidationResult(
+                isValid = false,
+                errorMessage = "Session not found or has been invalidated"
             )
         }
+        
+        // Check if session is expired and atomically mark it
+        if (session.isExpired()) {
+            logger.warn { "Session has expired: $sessionId" }
+            if (session.compareAndSetStatus(session.status, AuthStatus.EXPIRED)) {
+                activeSessions.remove(sessionId)
+            }
+            return SessionValidationResult(
+                isValid = false,
+                errorMessage = "Session has expired"
+            )
+        }
+        
+        // Check authentication status
+        if (session.status != AuthStatus.AUTHENTICATED) {
+            logger.warn { "Session is not authenticated: $sessionId (status: ${session.status})" }
+            return SessionValidationResult(
+                isValid = false,
+                errorMessage = "Session is not authenticated. Please complete authentication first."
+            )
+        }
+        
+        // Check allowed operations
+        if (!session.allowedOperations.contains(requiredOperation)) {
+            logger.warn { "Operation $requiredOperation not allowed for session: $sessionId" }
+            return SessionValidationResult(
+                isValid = false,
+                errorMessage = "Operation $requiredOperation is not allowed for this session"
+            )
+        }
+        
+        // Check and atomically increment usage count
+        if (session.wouldExceedUsageLimit()) {
+            logger.warn { "Session usage limit exceeded: $sessionId" }
+            if (session.compareAndSetStatus(AuthStatus.AUTHENTICATED, AuthStatus.EXPIRED)) {
+                activeSessions.remove(sessionId)
+            }
+            return SessionValidationResult(
+                isValid = false,
+                errorMessage = "Session usage limit exceeded"
+            )
+        }
+        
+        // Atomically increment usage count
+        val newUsageCount = session.incrementUsage()
+        
+        // Double-check usage limit after increment (rare edge case)
+        if (newUsageCount > session.maxUsages) {
+            logger.warn { "Session usage limit exceeded after increment: $sessionId" }
+            if (session.compareAndSetStatus(AuthStatus.AUTHENTICATED, AuthStatus.EXPIRED)) {
+                activeSessions.remove(sessionId)
+            }
+            return SessionValidationResult(
+                isValid = false,
+                errorMessage = "Session usage limit exceeded"
+            )
+        }
+        
+        logger.debug { "Session $sessionId used successfully (usage: $newUsageCount/${session.maxUsages})" }
+        
+        return SessionValidationResult(
+            isValid = true,
+            sessionAuth = session,
+            newUsageCount = newUsageCount
+        )
     }
     
     /**
      * Get session status
      */
     fun getSessionStatus(sessionId: String): SessionAuthResponse? {
-        return lock.read {
-            val session = activeSessions[sessionId]
-            session?.let {
-                if (it.isExpired()) {
-                    it.status = AuthStatus.EXPIRED
+        val session = activeSessions[sessionId]
+        return session?.let {
+            // Atomically check and mark expired sessions
+            if (it.isExpired() && it.compareAndSetStatus(it.status, AuthStatus.EXPIRED)) {
+                activeSessions.remove(sessionId)
+                // Clean up connection pools when session expires
+                it.connectionInfo?.let { connectionInfo ->
+                    databaseService.releaseSessionFromPool(sessionId, connectionInfo)
                 }
-                
-                SessionAuthResponse(
-                    sessionId = it.sessionId,
-                    status = it.status,
-                    expiresAt = it.expiresAt,
-                    allowedOperations = it.allowedOperations,
-                    connectionName = it.connectionInfo?.name,
-                    message = when (it.status) {
-                        AuthStatus.PENDING -> "Session is waiting for authentication"
-                        AuthStatus.AUTHENTICATED -> "Session is authenticated and ready"
-                        AuthStatus.EXPIRED -> "Session has expired"
-                        AuthStatus.INVALID -> "Session is invalid"
-                    }
-                )
             }
+            
+            SessionAuthResponse(
+                sessionId = it.sessionId,
+                status = it.status,
+                expiresAt = it.expiresAt,
+                allowedOperations = it.allowedOperations,
+                connectionName = it.connectionInfo?.name,
+                message = when (it.status) {
+                    AuthStatus.PENDING -> "Session is waiting for authentication"
+                    AuthStatus.AUTHENTICATED -> "Session is authenticated and ready"
+                    AuthStatus.EXPIRED -> "Session has expired"
+                    AuthStatus.INVALID -> "Session is invalid"
+                }
+            )
         }
     }
     
@@ -207,21 +220,9 @@ class SessionAuthenticationService(
      * Get session usage statistics
      */
     fun getSessionStats(sessionId: String): SessionUsageStats? {
-        return lock.read {
-            val session = activeSessions[sessionId]
-            session?.let {
-                SessionUsageStats(
-                    sessionId = it.sessionId,
-                    status = it.status,
-                    usageCount = it.usageCount,
-                    maxUsages = it.maxUsages,
-                    remainingUsages = it.maxUsages - it.usageCount,
-                    createdAt = it.createdAt,
-                    expiresAt = it.expiresAt,
-                    allowedOperations = it.allowedOperations,
-                    authenticatedAt = it.authenticatedAt
-                )
-            }
+        val session = activeSessions[sessionId]
+        return session?.let {
+            SessionUsageStats.fromSession(it)
         }
     }
     
@@ -229,16 +230,20 @@ class SessionAuthenticationService(
      * Invalidate a session immediately
      */
     fun invalidateSession(sessionId: String): Boolean {
-        return lock.write {
-            val session = activeSessions.remove(sessionId)
-            if (session != null) {
-                session.status = AuthStatus.INVALID
-                logger.info { "Session invalidated: $sessionId" }
-                true
-            } else {
-                logger.warn { "Attempted to invalidate non-existent session: $sessionId" }
-                false
+        val session = activeSessions.remove(sessionId)
+        return if (session != null) {
+            session.compareAndSetStatus(session.status, AuthStatus.INVALID)
+            
+            // Clean up connection pools when session is invalidated
+            session.connectionInfo?.let { connectionInfo ->
+                databaseService.releaseSessionFromPool(sessionId, connectionInfo)
             }
+            
+            logger.info { "Session invalidated: $sessionId" }
+            true
+        } else {
+            logger.warn { "Attempted to invalidate non-existent session: $sessionId" }
+            false
         }
     }
     
@@ -246,25 +251,21 @@ class SessionAuthenticationService(
      * Get count of active sessions (for monitoring)
      */
     fun getActiveSessionCount(): Int {
-        return lock.read {
-            activeSessions.values.count { it.status == AuthStatus.AUTHENTICATED && !it.isExpired() }
-        }
+        return activeSessions.values.count { it.status == AuthStatus.AUTHENTICATED && !it.isExpired() }
     }
     
     /**
      * Get all session statistics for monitoring
      */
     fun getAllSessionStats(): Map<String, Any> {
-        return lock.read {
-            val sessions = activeSessions.values
-            mapOf(
-                "totalSessions" to sessions.size,
-                "pendingSessions" to sessions.count { it.status == AuthStatus.PENDING },
-                "authenticatedSessions" to sessions.count { it.status == AuthStatus.AUTHENTICATED },
-                "expiredSessions" to sessions.count { it.status == AuthStatus.EXPIRED },
-                "invalidSessions" to sessions.count { it.status == AuthStatus.INVALID }
-            )
-        }
+        val sessions = activeSessions.values
+        return mapOf(
+            "totalSessions" to sessions.size,
+            "pendingSessions" to sessions.count { it.status == AuthStatus.PENDING },
+            "authenticatedSessions" to sessions.count { it.status == AuthStatus.AUTHENTICATED },
+            "expiredSessions" to sessions.count { it.status == AuthStatus.EXPIRED },
+            "invalidSessions" to sessions.count { it.status == AuthStatus.INVALID }
+        )
     }
     
     /**
@@ -272,20 +273,21 @@ class SessionAuthenticationService(
      */
     @Scheduled(fixedRate = 600000) // 10 minutes
     fun cleanupExpiredSessions() {
-        val cleanedCount = lock.write {
-            val iterator = activeSessions.entries.iterator()
-            var count = 0
+        var cleanedCount = 0
+        val iterator = activeSessions.entries.iterator()
+        
+        while (iterator.hasNext()) {
+            val (sessionId, session) = iterator.next()
             
-            while (iterator.hasNext()) {
-                val entry = iterator.next()
-                val session = entry.value
-                
-                if (session.isExpired() || session.status == AuthStatus.INVALID) {
-                    iterator.remove()
-                    count++
+            if (session.isExpired() || session.status == AuthStatus.INVALID) {
+                // Atomically mark expired sessions
+                if (session.isExpired()) {
+                    session.compareAndSetStatus(session.status, AuthStatus.EXPIRED)
                 }
+                iterator.remove()
+                cleanedCount++
+                logger.debug { "Cleaned up session: $sessionId (status: ${session.status})" }
             }
-            count
         }
         
         if (cleanedCount > 0) {
@@ -297,12 +299,17 @@ class SessionAuthenticationService(
      * Emergency: Invalidate all sessions
      */
     fun invalidateAllSessions(): Int {
-        return lock.write {
-            val count = activeSessions.size
-            activeSessions.clear()
-            logger.warn { "Emergency invalidation: cleared all $count sessions" }
-            count
+        val count = activeSessions.size
+        // Clean up all connection pools before clearing sessions
+        activeSessions.forEach { (sessionId, session) ->
+            session.connectionInfo?.let { connectionInfo ->
+                databaseService.releaseSessionFromPool(sessionId, connectionInfo)
+            }
         }
+        
+        activeSessions.clear()
+        logger.warn { "Emergency invalidation: cleared all $count sessions" }
+        return count
     }
     
     private fun testDatabaseConnection(request: AuthenticateSessionRequest) {
