@@ -54,7 +54,7 @@ class SchemaDiscoveryService(
      * List tables using session
      */
     fun listTablesUsingSession(sessionId: String, schemaName: String? = null): List<TableInfo> {
-        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.TABLE_LISTING)
 
         if(!sessionValidationResult.isValid){
             throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
@@ -101,7 +101,7 @@ class SchemaDiscoveryService(
      * Describe table using session
      */
     fun describeTableUsingSession(sessionId: String, tableName: String, schemaName: String? = null): TableSchema {
-        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.TABLE_DESCRIPTION)
 
         if(!sessionValidationResult.isValid){
             throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")

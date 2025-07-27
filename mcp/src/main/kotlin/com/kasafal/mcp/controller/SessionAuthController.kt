@@ -44,11 +44,47 @@ class SessionAuthController(
     }
     
     /**
-     * Show login page for a session
-     * GET /api/auth/login?session_id=xxx
+     * Get available database operations for permission selection
+     * GET /api/auth/permissions
+     */
+    @GetMapping("/permissions")
+    @ResponseBody
+    fun getAvailablePermissions(): ResponseEntity<Map<String, Any>> {
+        val groupedPermissions = DatabaseOperation.values()
+            .groupBy { it.category }
+            .mapValues { (_, operations) ->
+                operations.map { op ->
+                    mapOf(
+                        "operation" to op.name,
+                        "displayName" to op.displayName,
+                        "description" to op.description,
+                        "category" to op.category
+                    )
+                }
+            }
+        
+        return ResponseEntity.ok(mapOf(
+            "categories" to groupedPermissions,
+            "defaultPermissions" to listOf(
+                DatabaseOperation.SCHEMA_DISCOVERY.name,
+                DatabaseOperation.TABLE_LISTING.name,
+                DatabaseOperation.SELECT_QUERIES.name,
+                DatabaseOperation.SQL_VALIDATION.name
+            ),
+            "allPermissions" to DatabaseOperation.values().map { it.name }
+        ))
+    }
+
+    /**
+     * Show login page for a session with permission selection
+     * GET /api/auth/login?session_id=xxx&source=xxx
      */
     @GetMapping("/login")
-    fun loginPage(@RequestParam("session_id") sessionId: String, model: Model): String {
+    fun loginPage(
+        @RequestParam("session_id") sessionId: String,
+        @RequestParam(value = "source", defaultValue = "unknown") source: String,
+        model: Model
+    ): String {
         // Check if session exists
         val sessionStatus = sessionAuthService.getSessionStatus(sessionId)
         
@@ -65,11 +101,33 @@ class SessionAuthController(
         if (sessionStatus.status == AuthStatus.AUTHENTICATED) {
             model.addAttribute("message", "Session is already authenticated")
             model.addAttribute("sessionId", sessionId)
+            model.addAttribute("allowedOperations", sessionStatus.allowedOperations.map { it.displayName })
             return "claude-auth-complete"
         }
         
+        // Add permissions data for the UI
+        val groupedPermissions = DatabaseOperation.values()
+            .groupBy { it.category }
+            .mapValues { (_, operations) ->
+                operations.map { op ->
+                    mapOf(
+                        "operation" to op.name,
+                        "displayName" to op.displayName,
+                        "description" to op.description,
+                        "checked" to (op in setOf(
+                            DatabaseOperation.SCHEMA_DISCOVERY,
+                            DatabaseOperation.TABLE_LISTING,
+                            DatabaseOperation.SELECT_QUERIES,
+                            DatabaseOperation.SQL_VALIDATION
+                        ))
+                    )
+                }
+            }
+        
         model.addAttribute("sessionId", sessionId)
         model.addAttribute("purpose", "database_access")
+        model.addAttribute("permissionCategories", groupedPermissions)
+        model.addAttribute("source", source)
         return "auth-login"
     }
     
@@ -97,7 +155,7 @@ class SessionAuthController(
             ))
             
         } catch (e: Exception) {
-            logger.error(e) { "Authentication failed for session: ${request.sessionId}" }
+            logger.error(e.message) { "Authentication failed for session: ${request.sessionId}" }
             
             val errorResponse = mapOf(
                 "success" to false,

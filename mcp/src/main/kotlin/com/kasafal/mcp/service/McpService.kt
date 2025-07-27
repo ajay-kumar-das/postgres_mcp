@@ -147,11 +147,12 @@ class McpService(
         
         "start_oauth_flow" to McpTool(
             name = "start_oauth_flow",
-            description = "Start OAuth-style authentication flow for database access",
+            description = "Start OAuth-style authentication flow for database access with source tracking",
             inputSchema = mapOf(
                 "type" to "object",
                 "properties" to mapOf(
-                    "purpose" to mapOf("type" to "string", "description" to "Purpose for database access", "default" to "database_access")
+                    "purpose" to mapOf("type" to "string", "description" to "Purpose for database access", "default" to "database_access"),
+                    "source" to mapOf("type" to "string", "description" to "Source of the request (e.g., 'claude-desktop', 'vscode', 'api', 'web') to keep tracking the request source")
                 ),
                 "required" to emptyList<Any>()
             )
@@ -310,17 +311,19 @@ class McpService(
 
     private fun startOAuthFlow(arguments: Map<String, Any>): Any {
         val purpose = arguments["purpose"] as? String ?: "database_access"
+        val source = arguments["source"] as? String ?: "unknown"
         
-        val sessionResponse = sessionAuthenticationService.createSession(purpose)
-        val loginUrl = "http://localhost:$serverPort/api/auth/login?session_id=${sessionResponse.sessionId}"
+        val sessionResponse = sessionAuthenticationService.createSession(purpose, source)
+        val loginUrl = "http://localhost:$serverPort/api/auth/login?session_id=${sessionResponse.sessionId}&source=${source}"
         
-        logger.info { "OAuth flow initiated for session: ${sessionResponse.sessionId}" }
+        logger.info { "OAuth flow initiated for session: ${sessionResponse.sessionId} from source: $source" }
         
         return mapOf(
             "oauth_status" to "initiated",
             "session_id" to sessionResponse.sessionId,
             "login_url" to loginUrl,
             "purpose" to purpose,
+            "source" to source,
             "message" to "Please visit the login URL to authenticate your database access.",
             "instructions" to listOf(
                 "1. Click the login_url to open the authentication page in your browser",
@@ -334,6 +337,12 @@ class McpService(
                     "session_id" to sessionResponse.sessionId,
                     "query" to "SELECT * FROM your_table LIMIT 10"
                 )
+            ),
+            "tracking_info" to mapOf(
+                "session_created_at" to java.time.LocalDateTime.now().toString(),
+                "source_application" to source,
+                "access_purpose" to purpose,
+                "expires_at" to sessionResponse.expiresAt.toString()
             )
         )
     }

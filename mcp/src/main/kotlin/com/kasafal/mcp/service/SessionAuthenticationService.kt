@@ -27,9 +27,10 @@ class SessionAuthenticationService(
     /**
      * Create a new session for authentication
      */
-    fun createSession(purpose: String = "database_access"): SessionAuthResponse {
+    fun createSession(purpose: String = "database_access", source: String = "unknown"): SessionAuthResponse {
         val sessionAuth = SessionAuth(
             purpose = purpose,
+            source = source,
             allowedOperations = setOf(
                 DatabaseOperation.SCHEMA_DISCOVERY,
                 DatabaseOperation.TABLE_SAMPLING,
@@ -41,7 +42,7 @@ class SessionAuthenticationService(
         
         activeSessions[sessionAuth.sessionId] = sessionAuth
         
-        logger.info { "Created new session: ${sessionAuth.sessionId} for purpose: $purpose" }
+        logger.info { "Created new session: ${sessionAuth.sessionId} for purpose: $purpose from source: $source" }
         
         return SessionAuthResponse(
             sessionId = sessionAuth.sessionId,
@@ -93,7 +94,7 @@ class SessionAuthenticationService(
         session.authenticatedAt = LocalDateTime.now()
         session.connectionInfo = connectionInfo
         
-        logger.info { "Session authenticated successfully: ${request.sessionId}" }
+        logger.info { "Session authenticated successfully: ${request.sessionId} from source: ${session.source} for database: ${request.name}" }
         
         return SessionAuthResponse(
             sessionId = session.sessionId,
@@ -321,7 +322,7 @@ class SessionAuthenticationService(
                 }
             }
         } catch (e: Exception) {
-            logger.error(e) { "Failed to test connection to ${request.host}:${request.port}/${request.database}" }
+            logger.error(e.message) { "Failed to test connection to ${request.host}:${request.port}/${request.database}" }
             throw McpException("Connection test failed: ${e.message}")
         }
     }

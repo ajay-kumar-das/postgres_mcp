@@ -140,7 +140,7 @@ class QueryExecutionService(
 
     fun sampleTableDataUsingSession(sessionId: String, tableName: String, schemaName: String? = null,
                         sampleSize: Int = 10): List<Map<String, Any?>> {
-        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SELECT_QUERIES)
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.TABLE_SAMPLING)
             ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
         if(!sessionValidationResult.isValid){
             throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
@@ -159,7 +159,7 @@ class QueryExecutionService(
 
     fun findDuplicatesUsingSession(sessionId: String, tableName: String, columns: List<String>,
                        schemaName: String? = null): List<Map<String, Any?>> {
-        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SELECT_QUERIES)
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.DUPLICATE_DETECTION)
             ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
         if(!sessionValidationResult.isValid){
             throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
@@ -177,7 +177,7 @@ class QueryExecutionService(
 
 
     fun analyzeDataQualityUsingSession(sessionId: String, tableName: String, schemaName: String? = null): DataQualityReport {
-        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SELECT_QUERIES)
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.DATA_QUALITY_ANALYSIS)
             ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
         if(!sessionValidationResult.isValid){
             throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")

@@ -16,16 +16,38 @@ enum class AuthStatus {
 }
 
 /**
- * Database operations allowed for a session
+ * Database operations allowed for a session - now with granular permissions
  */
-enum class DatabaseOperation {
-    SCHEMA_DISCOVERY,      // Get database schema, tables, columns
-    TABLE_SAMPLING,        // Sample data from tables
-    SELECT_QUERIES,        // Execute SELECT queries
-    DATA_QUALITY_ANALYSIS, // Analyze data quality
-    DUPLICATE_DETECTION,   // Find duplicate records
-    EXPLAIN_QUERIES,       // Explain query execution plans
-    CONNECTION_TEST        // Test database connectivity
+enum class DatabaseOperation(val displayName: String, val description: String, val category: String) {
+    // Schema & Structure
+    SCHEMA_DISCOVERY("Schema Discovery", "View database schemas, tables, and structure", "Schema"),
+    TABLE_LISTING("Table Listing", "List tables and views in database", "Schema"),
+    TABLE_DESCRIPTION("Table Description", "Get detailed table column information", "Schema"),
+    
+    // Data Access
+    SELECT_QUERIES("Execute Queries", "Run SELECT queries on database", "Data Access"),
+    TABLE_SAMPLING("Table Sampling", "Get sample data from tables", "Data Access"),
+    VIEW_DATA("View Data", "Browse table contents with pagination", "Data Access"),
+    
+    // Analysis & Quality
+    DATA_QUALITY_ANALYSIS("Data Quality Analysis", "Analyze data quality issues", "Analysis"),
+    DUPLICATE_DETECTION("Duplicate Detection", "Find duplicate records in tables", "Analysis"),
+    DATA_PROFILING("Data Profiling", "Generate statistical profiles of data", "Analysis"),
+    COLUMN_ANALYSIS("Column Analysis", "Analyze column distributions and patterns", "Analysis"),
+    
+    // Performance & Diagnostics
+    EXPLAIN_QUERIES("Query Explanation", "Analyze query execution plans", "Performance"),
+    PERFORMANCE_MONITORING("Performance Monitoring", "Monitor query performance metrics", "Performance"),
+    INDEX_ANALYSIS("Index Analysis", "Analyze table indexes and recommendations", "Performance"),
+    
+    // Security & Validation
+    SQL_VALIDATION("SQL Validation", "Validate SQL syntax and security", "Security"),
+    CONNECTION_TEST("Connection Test", "Test database connectivity", "Security"),
+    QUERY_AUDITING("Query Auditing", "Log and audit executed queries", "Security"),
+    
+    // Advanced Features
+    CUSTOM_FUNCTIONS("Custom Functions", "Execute database functions and procedures", "Advanced"),
+    METADATA_ACCESS("Metadata Access", "Access database metadata and system tables", "Advanced")
 }
 
 /**
@@ -37,10 +59,13 @@ class SessionAuth(
     val createdAt: LocalDateTime = LocalDateTime.now(),
     val allowedOperations: Set<DatabaseOperation> = setOf(
         DatabaseOperation.SCHEMA_DISCOVERY,
+        DatabaseOperation.TABLE_LISTING,
         DatabaseOperation.TABLE_SAMPLING,
-        DatabaseOperation.SELECT_QUERIES
+        DatabaseOperation.SELECT_QUERIES,
+        DatabaseOperation.SQL_VALIDATION
     ),
     val purpose: String = "database_access",
+    val source: String = "unknown", // Track source of the session request
     val maxUsages: Int = 100
 ) {
     // Thread-safe atomic fields
@@ -130,7 +155,7 @@ data class DatabaseConnectionInfo(
 )
 
 /**
- * Request to authenticate a session with database credentials
+ * Request to authenticate a session with database credentials and permissions
  */
 data class AuthenticateSessionRequest(
     val sessionId: String,
@@ -142,7 +167,12 @@ data class AuthenticateSessionRequest(
     val password: String, // Will be encrypted immediately
     val schema: String = "public",
     val rateLimitPerSecond: Double = 5.0, // Rate limit: queries per second (default 5)
-    val description: String? = null
+    val description: String? = null,
+    val requestedOperations: Set<DatabaseOperation> = setOf(
+        DatabaseOperation.SCHEMA_DISCOVERY,
+        DatabaseOperation.TABLE_LISTING,
+        DatabaseOperation.SELECT_QUERIES
+    )
 )
 
 /**
@@ -179,7 +209,9 @@ data class SessionUsageStats(
     val createdAt: LocalDateTime,
     val expiresAt: LocalDateTime,
     val allowedOperations: Set<DatabaseOperation>,
-    val authenticatedAt: LocalDateTime?
+    val authenticatedAt: LocalDateTime?,
+    val purpose: String,
+    val source: String
 ) {
     companion object {
         /**
@@ -195,7 +227,9 @@ data class SessionUsageStats(
                 createdAt = session.createdAt,
                 expiresAt = session.expiresAt,
                 allowedOperations = session.allowedOperations,
-                authenticatedAt = session.authenticatedAt
+                authenticatedAt = session.authenticatedAt,
+                purpose = session.purpose,
+                source = session.source
             )
         }
     }
