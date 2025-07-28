@@ -1,50 +1,58 @@
 # PostgreSQL MCP Server
 
-A comprehensive Model Context Protocol (MCP) server that enables AI assistants like Claude to automatically discover, understand, and interact with PostgreSQL databases.
+A comprehensive Model Context Protocol (MCP) server that enables AI assistants like Claude to securely connect to and interact with PostgreSQL databases through an OAuth-style session-based authentication system.
 
 ## Features
 
 🔧 **Complete MCP Protocol Support**
 - Full implementation of MCP 2024-11-05 specification
-- 15+ specialized database tools for comprehensive database operations
-- Rich prompts for AI context and guidance
+- 10 specialized database tools for comprehensive database operations
+- Rich tool descriptions and contextual guidance for AI assistants
 
 🛡️ **Security First**
+- OAuth-style session-based authentication with web UI
 - SQL injection protection with comprehensive validation
-- Query sanitization and safe execution
-- Credential encryption and secure storage
-- Read-only operations by default with configurable permissions
+- Query sanitization and safe execution patterns
+- Credential encryption and secure in-memory storage
+- Granular permission system with 18 database operations across 5 categories
 
 🔍 **Intelligent Discovery**
-- Automatic schema discovery and mapping
-- Relationship analysis and foreign key detection
+- Automatic schema discovery and relationship mapping
+- Foreign key detection and constraint analysis
 - Data profiling and statistical analysis
-- Table and column metadata extraction
+- Table and column metadata extraction with type information
 
-📊 **Rich Toolset**
-- Database connection management
-- Schema exploration and documentation
-- Query execution with safety limits
-- Data sampling and quality analysis
-- Query optimization and performance analysis
+📊 **Rich Database Toolset**
+- Session-based connection management with cleanup
+- Interactive schema exploration and documentation
+- Safe query execution with configurable limits
+- Data sampling and quality analysis tools
+- SQL validation and security checking
+
+🌐 **Modern Web Interface**
+- Responsive authentication UI with Bootstrap design
+- Real-time connection testing and validation
+- Granular permission selection by category
+- Mobile-friendly responsive design
 
 🚀 **Production Ready**
 - Docker containerization with health checks
-- Comprehensive monitoring and metrics
-- Structured logging and error handling
-- Configurable security and performance settings
+- Prometheus monitoring and metrics collection
+- Comprehensive structured logging
+- Thread-safe operations with atomic session management
+- HikariCP connection pooling for performance
 
 ## Quick Start
 
 ### Prerequisites
 - Java 17+
 - Docker and Docker Compose
-- PostgreSQL (or use the included Docker setup)
+- PostgreSQL database (or use the included Docker setup)
 
 ### 1. Clone and Build
 ```bash
 git clone <repository-url>
-cd postgres-mcp-server
+cd postgres-mcp
 chmod +x build.sh run.sh stop.sh
 ./build.sh
 ```
@@ -55,17 +63,18 @@ chmod +x build.sh run.sh stop.sh
 ```
 
 This starts:
-- PostgreSQL MCP Server on `http://localhost:8080`
+- PostgreSQL MCP Server on `http://localhost:8081`
 - PostgreSQL database on `localhost:5433`
-- Sample data for testing
+- PgAdmin on `http://localhost:5050`
+- Prometheus monitoring on `http://localhost:9090`
 
 ### 3. Test the Installation
 ```bash
 # Health check
-curl http://localhost:8080/mcp/health
+curl http://localhost:8081/mcp/health
 
 # List available tools
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://localhost:8081/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -74,58 +83,60 @@ curl -X POST http://localhost:8080/mcp \
   }'
 ```
 
-## MCP Tools Available (Token-Based)
+## MCP Tools Available
 
-### Session Token Management
-- **Session Tokens**: All operations require secure session tokens instead of connection IDs
-- **Permissions**: Fine-grained control over allowed operations per token
-- **Expiration**: Automatic token expiration with configurable timeouts
-- **Audit Trail**: Complete logging of token usage and operations
+### Authentication & Session Management
+- **`start_oauth_flow`** - Initiate OAuth-style authentication flow with source tracking
+- **`disconnect_session`** - Invalidate session and clean up resources
 
-### Core Database Tools
-- **`execute_query`** - Execute SELECT queries safely with token authentication
-- **`discover_schema`** - Get complete database schema information
-- **`list_tables`** - List all tables in a specific schema
-- **`describe_table`** - Get detailed table structure and metadata
-- **`sample_table_data`** - Get random sample data from tables
+### Schema Discovery Tools
+- **`discover_schema`** - Get complete database schema with relationships
+- **`list_tables`** - List all tables in the specified schema
+- **`describe_table`** - Get detailed table structure, columns, and constraints
 
-### Data Analysis Tools
-- **`analyze_data_quality`** - Comprehensive data quality analysis
-- **`find_duplicates`** - Identify duplicate records in tables
-- **`validate_sql`** - Validate SQL syntax before execution
-- **`explain_query`** - Get query execution plans and performance insights
+### Data Access Tools
+- **`execute_query`** - Execute SELECT queries safely with session authentication
+- **`sample_table_data`** - Get random sample data from specified tables
 
-## Token-Based Usage Examples
+### Analysis & Quality Tools
+- **`analyze_data_quality`** - Comprehensive data quality analysis with statistics
+- **`find_duplicates`** - Identify duplicate records based on specified columns
+- **`validate_sql`** - Validate SQL syntax and check for security issues (no session required)
 
-**Important**: All database operations now require session tokens for enhanced security. The AI never has direct access to database credentials.
+## Session-Based Authentication Flow
 
-### New Security Features
-- ✅ **Token-Free Initialization**: Claude can initialize and list tools without any credentials
-- ✅ **Smart Token Redirect**: When database access is needed, Claude automatically redirects users to a secure token generation UI
-- ✅ **No Config Credentials**: No database credentials are stored in Claude's configuration
-- ✅ **Seamless UX**: Users generate tokens via a user-friendly web interface when needed
+**Important**: This server uses OAuth-style session-based authentication. AI assistants never need database credentials directly.
 
-### Create Session Token First
+### 1. Start Authentication Flow
 ```json
 {
   "jsonrpc": "2.0",
   "id": "1",
-  "method": "POST",
-  "url": "/api/session/tokens",
-  "body": {
-    "name": "Analysis Session",
-    "host": "localhost",
-    "port": 5432,
-    "database": "mydb",
-    "username": "user",
-    "password": "password",
-    "expirationMinutes": 60,
-    "allowedOperations": ["SCHEMA_DISCOVERY", "SELECT_QUERIES"]
+  "method": "tools/call",
+  "params": {
+    "name": "start_oauth_flow",
+    "arguments": {
+      "purpose": "Database analysis for Claude",
+      "source": "claude-desktop"
+    }
   }
 }
 ```
 
-### Explore Database Schema
+**Response includes:**
+- Session ID for tracking
+- Login URL for web authentication
+- Instructions for the user
+- Example usage patterns
+
+### 2. User Authentication
+Users visit the provided login URL and authenticate via a modern web interface:
+- Enter database connection details
+- Select granular permissions by category
+- Test connection in real-time
+- Receive session confirmation
+
+### 3. Use Session for Database Operations
 ```json
 {
   "jsonrpc": "2.0",
@@ -134,81 +145,156 @@ curl -X POST http://localhost:8080/mcp \
   "params": {
     "name": "discover_schema",
     "arguments": {
-      "token_id": "tok_a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      "session_id": "abc123-def456-ghi789"
     }
   }
 }
 ```
 
-### Execute Safe Query
+## Permission System
+
+### Granular Database Operations (18 Permissions)
+
+**Schema & Structure**
+- Schema Discovery - View database schemas and structure
+- Table Listing - List tables and views
+- Table Description - Get detailed column information
+
+**Data Access**
+- Execute Queries - Run SELECT statements
+- Table Sampling - Get sample data from tables
+- View Data - Browse table contents with pagination
+
+**Analysis & Quality**
+- Data Quality Analysis - Analyze data quality issues
+- Duplicate Detection - Find duplicate records
+- Data Profiling - Generate statistical profiles
+- Column Analysis - Analyze distributions and patterns
+
+**Performance & Diagnostics**
+- Query Explanation - Analyze execution plans
+- Performance Monitoring - Monitor query metrics
+- Index Analysis - Analyze indexes and recommendations
+
+**Security & Validation**
+- SQL Validation - Validate syntax and security
+- Connection Test - Test database connectivity
+- Query Auditing - Log and audit operations
+
+**Advanced Features**
+- Custom Functions - Execute database functions
+- Metadata Access - Access system metadata
+
+## Usage Examples
+
+### Complete Workflow Example
 ```json
+// 1. Start authentication
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "tools/call",
+  "params": {
+    "name": "start_oauth_flow",
+    "arguments": {
+      "purpose": "Data analysis and optimization",
+      "source": "claude-desktop"
+    }
+  }
+}
+
+// 2. After user authenticates via web UI, explore schema
+{
+  "jsonrpc": "2.0",
+  "id": "2",
+  "method": "tools/call",
+  "params": {
+    "name": "discover_schema",
+    "arguments": {
+      "session_id": "your-session-id"
+    }
+  }
+}
+
+// 3. Analyze specific table
 {
   "jsonrpc": "2.0",
   "id": "3",
   "method": "tools/call",
   "params": {
-    "name": "execute_query",
+    "name": "analyze_data_quality",
     "arguments": {
-      "token_id": "tok_a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "query": "SELECT * FROM users WHERE active = true",
-      "limit": 10
+      "session_id": "your-session-id",
+      "table_name": "users"
     }
   }
 }
-```
 
-## Claude Integration
-
-The server provides rich contextual prompts that give Claude complete understanding of your database:
-
-### Database Analysis with Token
-```json
+// 4. Execute safe queries
 {
   "jsonrpc": "2.0",
   "id": "4",
   "method": "tools/call",
   "params": {
-    "name": "analyze_data_quality",
+    "name": "execute_query",
     "arguments": {
-      "token_id": "tok_a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "table_name": "users"
+      "session_id": "your-session-id",
+      "query": "SELECT COUNT(*) as total_users, AVG(age) as avg_age FROM users WHERE active = true",
+      "limit": 100
     }
   }
 }
 ```
 
-This provides Claude with:
-- Complete schema overview with tables, columns, and relationships
-- Data statistics and patterns
-- Available tools and their usage
-- Best practices and guidelines
-- Sample queries and analysis patterns
-
 ## Configuration
 
 ### Environment Variables
 ```bash
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=mcp_server
-DB_USERNAME=mcp_user
-DB_PASSWORD=your_password
+# Database (for Docker setup)
+POSTGRES_DB=mcp_demo
+POSTGRES_USER=mcp_user
+POSTGRES_PASSWORD=mcp_password
 
 # Security
-ENCRYPTION_PASSWORD=your_encryption_key
-ENCRYPTION_SALT=your_salt
+ENCRYPTION_PASSWORD=your_encryption_key_change_in_production
+ENCRYPTION_SALT=your_salt_change_in_production
 
 # Application
 SPRING_PROFILES_ACTIVE=production
+SERVER_PORT=8081
 ```
 
-### Application Settings
-See `application.yml` for detailed configuration options:
-- Database connection pools
-- Query limits and timeouts
-- Security settings
-- Logging configuration
+### Application Settings (application.yml)
+```yaml
+server:
+  port: 8081
+  tomcat:
+    threads:
+      max: 100          # Support 100 concurrent AI requests
+      min-spare: 10     # Always keep 10 threads ready
+      accept-count: 200 # Queue requests when busy
+      max-connections: 8192
+
+spring:
+  application:
+    name: postgres-mcp-server
+
+# Security settings
+security:
+  encryption:
+    password: ${ENCRYPTION_PASSWORD:default_key_change_in_production}
+    salt: ${ENCRYPTION_SALT:default_salt_change_in_production}
+
+# Database connection settings
+database:
+  query:
+    timeout-seconds: 30
+    max-rows: 1000
+  connection:
+    max-pool-size: 10
+    min-idle: 2
+    connection-timeout: 30000
+```
 
 ## Development
 
@@ -222,17 +308,25 @@ See `application.yml` for detailed configuration options:
 ./run.sh development
 ```
 
-Includes:
+Features:
 - Debug port (5005) for remote debugging
-- Detailed logging
+- Detailed logging output
 - Hot reload capabilities
-- Development database
+- Development database with sample data
 
-### Adding New Tools
-1. Define tool schema in `McpServerService`
-2. Implement tool logic
-3. Add validation and error handling
-4. Update documentation
+### Project Structure
+```
+src/main/kotlin/com/kasafal/mcp/
+├── config/           # Security and application configuration
+├── controller/       # REST controllers for authentication
+├── exception/        # Custom exception handling
+├── model/           # Data models and DTOs
+│   ├── mcp/         # MCP protocol models
+│   └── session/     # Session and authentication models
+├── service/         # Business logic services
+├── util/            # Utility classes (SQL validation, etc.)
+└── McpApplication.kt # Main application class
+```
 
 ## Production Deployment
 
@@ -242,62 +336,74 @@ Includes:
 ```
 
 Includes:
-- PostgreSQL MCP Server
+- PostgreSQL MCP Server (8081)
 - PostgreSQL database with persistence
-- PgAdmin for database management
-- Prometheus for monitoring
-- Health checks and auto-restart
+- PgAdmin for database management (5050)
+- Prometheus for monitoring (9090)
+- Health checks and auto-restart policies
 
-### Kubernetes
-Example Kubernetes manifests available in `k8s/` directory:
-- Deployment with health checks
-- Service and ingress configuration
-- ConfigMap and Secret management
-- Persistent volume claims
+### Manual Deployment
+```bash
+# Build JAR
+./gradlew bootJar
 
-### Monitoring
-- Health endpoints: `/mcp/health`
-- Metrics: `/actuator/prometheus`
-- Logs: Structured JSON logging
-- Database metrics via PostgreSQL exporter
+# Run with production profile
+java -jar build/libs/mcp-*.jar --spring.profiles.active=production
+```
+
+### Monitoring Endpoints
+- Health check: `GET /mcp/health`
+- Application health: `GET /actuator/health`
+- Prometheus metrics: `GET /actuator/prometheus`
+- Session statistics: `GET /api/auth/stats`
 
 ## Security Considerations
 
-### SQL Injection Protection
-- Comprehensive query validation
-- Parameterized queries only
-- Keyword blacklisting
-- Pattern-based injection detection
+### Session Management
+- Sessions stored in thread-safe in-memory storage
+- Automatic expiration after 2 hours or 100 operations
+- Atomic operations prevent race conditions
+- Session cleanup on expiration or invalidation
 
-### Access Control
-- Encrypted credential storage
-- Connection-based isolation
-- Query timeouts and limits
-- Audit logging
+### SQL Security
+- Comprehensive SQL injection protection
+- Query pattern analysis and validation
+- Parameterized queries enforcement
+- Suspicious query detection and logging
 
 ### Network Security
-- HTTPS/TLS support
-- CORS configuration
-- Rate limiting
-- IP allowlisting
+- CORS configuration for allowed origins
+- CSRF protection with token repository
+- BCrypt password encoding for credentials
+- Encrypted credential storage in memory
+
+### Access Control
+- Granular permission system per session
+- Operation-level access control
+- Query timeouts and result limits
+- Complete audit logging
 
 ## API Reference
 
 ### MCP Protocol Endpoints
-- `POST /mcp` - Main MCP protocol endpoint
-- `GET /mcp/health` - Health check
+- `POST /mcp` - Main MCP protocol endpoint (JSON-RPC 2.0)
+- `GET /mcp/health` - Health check with status
 
-### Session Token API Endpoints
-- `POST /api/session/tokens` - Create new session token
-- `GET /api/session/tokens/{tokenId}/stats` - Get token usage statistics
-- `DELETE /api/session/tokens/{tokenId}` - Invalidate specific token
-- `DELETE /api/session/tokens` - Emergency: Invalidate all tokens
-- `GET /api/session/stats` - Get system token statistics
-- `GET /api/session/health` - Session token system health check
+### Session Authentication UI
+- `GET /api/auth/login?session_id={id}&source={source}` - Authentication page
+- `POST /api/auth/authenticate` - Process authentication form
+- `GET /api/auth/permissions` - Get available permissions
 
-### Monitoring Endpoints
-- `GET /actuator/health` - Application health
-- `GET /actuator/metrics` - Application metrics
+### Session Management API
+- `GET /api/auth/sessions/{sessionId}/status` - Session status
+- `GET /api/auth/sessions/{sessionId}/stats` - Session statistics
+- `DELETE /api/auth/sessions/{sessionId}` - Invalidate session
+- `DELETE /api/auth/sessions` - Emergency: invalidate all sessions
+
+### System Monitoring
+- `GET /api/auth/stats` - System session statistics
+- `GET /api/auth/health` - Session system health
+- `GET /actuator/health` - Spring Boot health
 - `GET /actuator/prometheus` - Prometheus metrics
 
 ## Troubleshooting
@@ -305,45 +411,80 @@ Example Kubernetes manifests available in `k8s/` directory:
 ### Common Issues
 
 **Connection Timeouts**
-- Check database connectivity
-- Verify firewall settings
-- Increase connection timeout values
+- Verify PostgreSQL is running and accessible
+- Check firewall settings and port availability
+- Increase connection timeout in application.yml
 
-**Query Validation Errors**
-- Review SQL syntax
-- Check for prohibited keywords
-- Ensure proper parameterization
+**Session Authentication Failures**
+- Ensure database credentials are correct
+- Check that the database allows connections from the server
+- Verify encryption settings are consistent
 
 **Memory Issues**
-- Reduce query result limits
-- Increase JVM heap size
-- Check for connection leaks
+- Reduce max-rows limit in configuration
+- Increase JVM heap size: `-Xmx2g`
+- Monitor session cleanup and connection pooling
 
-### Logs
+### Debug Logging
 ```bash
-# Application logs
+# View application logs
 docker-compose logs postgres-mcp
 
-# Database logs
-docker-compose logs postgres
-
-# Follow logs
+# Follow real-time logs
 docker-compose logs -f postgres-mcp
+
+# View specific service logs
+docker-compose logs postgres
 ```
+
+### Session Debugging
+Add `?debug=true` to login URL for enhanced debugging:
+```
+http://localhost:8081/api/auth/login?session_id=test&source=debug&debug=true
+```
+
+## Claude Integration Guide
+
+### Recommended Claude Configuration
+```json
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "curl",
+      "args": [
+        "-X", "POST",
+        "http://localhost:8081/mcp",
+        "-H", "Content-Type: application/json",
+        "-d", "@-"
+      ]
+    }
+  }
+}
+```
+
+### Best Practices for AI Assistants
+1. **Always start with `start_oauth_flow`** when database access is needed
+2. **Use `discover_schema`** to understand database structure first
+3. **Validate SQL** before execution using `validate_sql`
+4. **Respect session limits** - sessions expire after 100 operations
+5. **Clean up sessions** using `disconnect_session` when done
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+4. Ensure all tests pass (`./gradlew test`)
+5. Commit changes (`git commit -m 'Add amazing feature'`)
+6. Push to branch (`git push origin feature/amazing-feature`)
+7. Submit a pull request
 
-### Code Style
+### Code Standards
 - Kotlin coding conventions
-- Comprehensive unit tests
-- Clear documentation
-- Error handling and logging
+- Comprehensive unit and integration tests
+- Clear documentation and comments
+- Proper error handling and logging
+- Thread-safe operations where applicable
 
 ## License
 
@@ -352,10 +493,12 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 For issues and questions:
-- GitHub Issues: [Repository Issues](https://github.com/yourorg/postgres-mcp-server/issues)
-- Documentation: [Wiki](https://github.com/yourorg/postgres-mcp-server/wiki)
-- Email: support@yourorg.com
+- GitHub Issues: Create an issue for bugs or feature requests
+- Documentation: Check the code comments and examples
+- Security Issues: Report privately via email
 
 ---
 
-Built with ❤️ for the AI and database communities.
+**Built for AI-powered database interactions** 🤖 💾
+
+*Enabling secure, intelligent database access for the next generation of AI assistants.*
