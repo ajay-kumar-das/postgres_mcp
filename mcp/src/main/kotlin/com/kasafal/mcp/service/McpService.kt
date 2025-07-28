@@ -144,17 +144,24 @@ class McpService(
                 "required" to listOf("session_id")
             )
         ),
-        
+
         "start_oauth_flow" to McpTool(
             name = "start_oauth_flow",
-            description = "Start OAuth-style authentication flow for database access with source tracking",
+            description = "Start OAuth-style authentication flow for database access. For Claude conversations, use 'claude-desktop' as the source.",
             inputSchema = mapOf(
                 "type" to "object",
                 "properties" to mapOf(
-                    "purpose" to mapOf("type" to "string", "description" to "Purpose for database access", "default" to "database_access"),
-                    "source" to mapOf("type" to "string", "description" to "Source of the request (e.g., 'claude-desktop', 'vscode', 'api', 'web') to keep tracking the request source")
+                    "purpose" to mapOf(
+                        "type" to "string",
+                        "description" to "Purpose for database access",
+                    ),
+                    "source" to mapOf(
+                        "type" to "string",
+                        "description" to "Source of the request for tracking purposes. Examples: 'claude-desktop', 'vscode', 'api details', 'web-site-name', 'mobile-app-name', 'custom-integration-name'",
+                        "examples" to listOf("claude-desktop", "vscode", "api details", "web site name")
+                    )
                 ),
-                "required" to emptyList<Any>()
+                "required" to listOf("purpose","source")
             )
         )
     )
