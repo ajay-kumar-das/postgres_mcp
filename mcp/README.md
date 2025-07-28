@@ -141,6 +141,79 @@ Instead of building rigid integrations, PostgreSQL MCP Server enables **conversa
 
 This transforms databases from static data stores into **interactive knowledge sources** that AI can explore, understand, and analyze in real-time.
 
+## Architecture Overview
+
+### Simple 4-Step Flow
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   1. AI Request │───▶│  2. User Auth   │───▶│ 3. AI Discovery │───▶│  4. Database    │
+│                 │    │                 │    │                 │    │     Results     │
+│  Claude asks    │    │ User provides   │    │ Claude maps     │    │ Dynamic query   │
+│  for database   │    │ credentials     │    │ schema & data   │    │ results with    │
+│  access         │    │ via secure UI   │    │ automatically   │    │ insights        │
+└─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Detailed Architecture Flow
+
+```
+AI Assistant (Claude)                PostgreSQL MCP Server                    User & Database
+       │                                      │                                     │
+       │ 1. start_oauth_flow                 │                                     │
+       │ ──────────────────────────────────▶ │                                     │
+       │                                     │                                     │
+       │ 2. Session + Login URL              │ 3. Secure Web Authentication       │
+       │ ◀────────────────────────────────── │ ──────────────────────────────────▶ │
+       │                                     │                                     │
+       │ "Please visit the login URL to      │ ┌─────────────────────────────────┐ │
+       │  authenticate your database"        │ │  Responsive Auth UI             │ │
+       │                                     │ │  ├─ Connection Details          │ │
+       │                                     │ │  ├─ Permission Selection        │ │
+       │                                     │ │  └─ Real-time Validation        │ │
+       │                                     │ └─────────────────────────────────┘ │
+       │                                     │                                     │
+       │ 4. discover_schema                  │ 5. Database Schema Discovery        │
+       │ ──────────────────────────────────▶ │ ──────────────────────────────────▶ │
+       │                                     │                                     │
+       │ 6. Complete Database Map            │ 7. Intelligent Analysis            │
+       │ ◀────────────────────────────────── │ ◀────────────────────────────────── │
+       │                                     │                                     │
+       │ Now Claude understands:             │ • Table relationships              │
+       │ • All tables and relationships      │ • Data types and constraints        │
+       │ • Business logic patterns           │ • Indexes and performance           │
+       │ • Data quality and patterns         │ • Sample data for context           │
+       │                                     │                                     │
+       │ 8. Natural Language Queries         │ 9. AI-Generated SQL                 │
+       │ ──────────────────────────────────▶ │ ──────────────────────────────────▶ │
+       │ "Show me customer churn patterns"   │                                     │
+       │                                     │                                     │
+       │ 10. Insights + Recommendations      │ 11. Secure Query Results           │
+       │ ◀────────────────────────────────── │ ◀────────────────────────────────── │
+```
+
+### Security & Session Management
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Zero-Trust Security Model                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │ AI Assistant│    │   Session   │    │  Database   │    │  User Auth  │  │
+│  │   (Claude)  │    │  Manager    │    │  Security   │    │     UI      │  │
+│  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘  │
+│         │                   │                   │                   │       │
+│         │ No DB Credentials │ Encrypted Storage │ SQL Injection     │ OAuth │
+│         │ Ever Stored       │ Session Isolation │ Prevention        │ Style │
+│         │                   │ Auto Expiration   │ Query Validation  │ Flow  │
+│         │                   │ Atomic Operations │ Result Limits     │       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+> 📖 **For complete architecture details, security model, and component diagrams, see [ARCHITECTURE.md](./ARCHITECTURE.md)**
+
 ## Quick Start
 
 ### Prerequisites
