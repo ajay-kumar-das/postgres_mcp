@@ -248,22 +248,6 @@ Users visit the provided login URL and authenticate via a modern web interface:
 
 ## Configuration
 
-### Environment Variables
-```bash
-# Database (for Docker setup)
-POSTGRES_DB=mcp_demo
-POSTGRES_USER=mcp_user
-POSTGRES_PASSWORD=mcp_password
-
-# Security
-ENCRYPTION_PASSWORD=your_encryption_key_change_in_production
-ENCRYPTION_SALT=your_salt_change_in_production
-
-# Application
-SPRING_PROFILES_ACTIVE=production
-SERVER_PORT=8081
-```
-
 ### Application Settings (application.yml)
 ```yaml
 server:
