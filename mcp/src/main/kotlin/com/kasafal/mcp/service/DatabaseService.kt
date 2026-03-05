@@ -1,16 +1,14 @@
 package com.kasafal.mcp.service
 
-import com.kasafal.mcp.config.ClientDbConfig
 import com.kasafal.mcp.exception.DatabaseException
 import com.kasafal.mcp.model.database.*
-import com.kasafal.mcp.repository.DatabaseConnectionRepository
+import com.kasafal.mcp.model.session.DatabaseConnectionInfo
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import mu.KotlinLogging
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
-import java.sql.DriverManager
-import java.sql.SQLException
-import java.time.LocalDateTime
+import java.sql.*
 import java.util.concurrent.ConcurrentHashMap
 import javax.sql.DataSource
 
@@ -18,89 +16,19 @@ private val logger = KotlinLogging.logger {}
 
 @Service
 class DatabaseService(
-    private val connectionRepository: DatabaseConnectionRepository,
-    private val credentialService: CredentialService,
-    private val clientDbConfig: ClientDbConfig
+    private val credentialService: CredentialService
 ) {
+    
+    // Cache for DataSources to avoid creating multiple pools for the same connection info
+    private val dataSourceCache = ConcurrentHashMap<String, DataSource>()
+    
+    // Track which sessions are using which connection pools
+    // Key: cacheKey (host:port:db:user), Value: Set of session IDs using this pool
+    private val poolSessionReferences = ConcurrentHashMap<String, MutableSet<String>>()
 
-    private val dataSources = ConcurrentHashMap<Long, DataSource>()
-
-    fun createConnection(): DatabaseConnection {
-        logger.info { "Creating new database connection: ${clientDbConfig.name}" }
-
-        // Check if connection already exists
-        val existing = connectionRepository.findByNameAndHostAndPortAndDatabaseAndUsernameAndSchema(
-            clientDbConfig.name, clientDbConfig.host, clientDbConfig.port, clientDbConfig.database, clientDbConfig.username, clientDbConfig.schema
-        )
-        if (existing != null) {
-            logger.info { "Connection already exists: ${existing.id}" }
-            return existing
-        }
-
-        // Test connection first
-        testConnection()
-
-        val encryptedPassword = credentialService.encrypt(clientDbConfig.password)
-
-        val connection = DatabaseConnection(
-            name = clientDbConfig.name,
-            host = clientDbConfig.host,
-            port = clientDbConfig.port,
-            database = clientDbConfig.database,
-            username = clientDbConfig.username,
-            encryptedPassword = encryptedPassword,
-            schema = clientDbConfig.schema,
-            description = clientDbConfig.description,
-            createdAt = LocalDateTime.now(),
-            updatedAt = LocalDateTime.now()
-        )
-
-        return connectionRepository.save(connection)
-    }
-
-    private fun testConnection(): Boolean {
-        return try {
-            val url = "jdbc:postgresql://${clientDbConfig.host}:${clientDbConfig.port}/${clientDbConfig.database}"
-            DriverManager.getConnection(url, clientDbConfig.username, clientDbConfig.password).use { connection ->
-                connection.isValid(5)
-            }
-        } catch (e: SQLException) {
-            logger.error(e) { "Failed to test connection to ${clientDbConfig.host}:${clientDbConfig.port}/${clientDbConfig.database}" }
-            throw DatabaseException("Connection test failed: ${e.message}", e)
-        }
-    }
-
-    fun getAllConnections(): List<DatabaseConnection> {
-        return connectionRepository.findByIsActiveTrue()
-    }
-
-    fun getConnection(id: Long): DatabaseConnection {
-        return connectionRepository.findById(id).orElseThrow {
-            DatabaseException("Database connection not found: $id")
-        }
-    }
-
-    fun deleteConnection(id: Long) {
-        logger.info { "Deleting database connection: $id" }
-
-        // Close existing data source
-        dataSources[id]?.let { dataSource ->
-            if (dataSource is HikariDataSource) {
-                dataSource.close()
-            }
-        }
-        dataSources.remove(id)
-
-        connectionRepository.deleteById(id)
-    }
-
-    fun getDataSource(connectionId: Long): DataSource {
-        return dataSources.computeIfAbsent(connectionId) { id ->
-            val dbConnection = getConnection(id)
-            createDataSource(dbConnection)
-        }
-    }
-
+    /**
+     * Test database connection with provided credentials
+     */
     fun testConnection(dto: DatabaseConnectionDto): Boolean {
         return try {
             val url = "jdbc:postgresql://${dto.host}:${dto.port}/${dto.database}"
@@ -112,42 +40,56 @@ class DatabaseService(
             throw DatabaseException("Connection test failed: ${e.message}", e)
         }
     }
-
-    fun testConnection(connectionId: Long): Boolean {
-        val dbConnection = getConnection(connectionId)
-        val decryptedPassword = credentialService.decrypt(dbConnection.encryptedPassword)
-
-        return testConnection(DatabaseConnectionDto(
-            name = dbConnection.name,
-            host = dbConnection.host,
-            port = dbConnection.port,
-            database = dbConnection.database,
-            username = dbConnection.username,
-            password = decryptedPassword,
-            schema = dbConnection.schema
-        ))
+    
+    /**
+     * Get DataSource for a session (tracks session reference to pool)
+     */
+    fun getDataSourceForSession(sessionId: String, connectionInfo: DatabaseConnectionInfo): DataSource {
+        val cacheKey = "${connectionInfo.host}:${connectionInfo.port}:${connectionInfo.database}:${connectionInfo.username}"
+        
+        // Add this session to the pool reference set
+        poolSessionReferences.computeIfAbsent(cacheKey) { ConcurrentHashMap.newKeySet() }.add(sessionId)
+        
+        val dataSource = dataSourceCache.computeIfAbsent(cacheKey) {
+            logger.info { "Creating new HikariCP connection pool for: $cacheKey" }
+            createDataSource(connectionInfo)
+        }
+        
+        logger.debug { "Session $sessionId using pool $cacheKey (${poolSessionReferences[cacheKey]?.size} sessions total)" }
+        return dataSource
     }
-
-    private fun createDataSource(dbConnection: DatabaseConnection): DataSource {
-        val decryptedPassword = credentialService.decrypt(dbConnection.encryptedPassword)
-
+    
+    /**
+     * Legacy method for backward compatibility
+     */
+    fun getDataSourceByInfo(connectionInfo: DatabaseConnectionInfo): DataSource {
+        val cacheKey = "${connectionInfo.host}:${connectionInfo.port}:${connectionInfo.database}:${connectionInfo.username}"
+        return dataSourceCache.computeIfAbsent(cacheKey) {
+            logger.info { "Creating new HikariCP connection pool for: $cacheKey (legacy access)" }
+            createDataSource(connectionInfo)
+        }
+    }
+    
+    private fun createDataSource(connectionInfo: DatabaseConnectionInfo): DataSource {
+        val decryptedPassword = credentialService.decrypt(connectionInfo.encryptedPassword)
+        
         val config = HikariConfig().apply {
-            jdbcUrl = "jdbc:postgresql://${dbConnection.host}:${dbConnection.port}/${dbConnection.database}"
-            username = dbConnection.username
+            jdbcUrl = "jdbc:postgresql://${connectionInfo.host}:${connectionInfo.port}/${connectionInfo.database}"
+            username = connectionInfo.username
             password = decryptedPassword
-            schema = dbConnection.schema
+            schema = connectionInfo.schema
 
-            // Connection pool settings
-            maximumPoolSize = dbConnection.maxConnections
+            // Connection pool settings based on session token limits
+            maximumPoolSize = connectionInfo.maxConnections
             minimumIdle = 1
             connectionTimeout = 30000
-            idleTimeout = 600000
-            maxLifetime = 1800000
+            idleTimeout = 300000 // 5 minutes for session-based connections
+            maxLifetime = 900000 // 15 minutes for session-based connections
             leakDetectionThreshold = 60000
 
             // PostgreSQL specific settings
-            addDataSourceProperty("ApplicationName", "PostgreSQL MCP Server")
-            addDataSourceProperty("currentSchema", dbConnection.schema)
+            addDataSourceProperty("ApplicationName", "PostgreSQL MCP Server (Session)")
+            addDataSourceProperty("currentSchema", connectionInfo.schema)
 
             // Security settings
             addDataSourceProperty("ssl", "false") // Configure based on your needs
@@ -159,114 +101,204 @@ class DatabaseService(
             addDataSourceProperty("binaryTransfer", "true")
         }
 
-        return HikariDataSource(config)
+        val dataSource = HikariDataSource(config)
+        
+        logger.info { 
+            "Created HikariCP pool - MaxPool: ${config.maximumPoolSize}, " +
+            "MinIdle: ${config.minimumIdle}, ConnTimeout: ${config.connectionTimeout}ms"
+        }
+        
+        return dataSource
     }
-
-    fun executeQuery(connectionId: Long, sql: String): QueryResult {
+    
+    /**
+     * Execute a query and return results
+     */
+    fun executeQuery(dataSource: DataSource, query: String, timeoutSeconds: Int = 30): QueryResult {
         val startTime = System.currentTimeMillis()
-
-        return try {
-            getDataSource(connectionId).connection.use { connection ->
-                connection.prepareStatement(sql).use { statement ->
-                    statement.queryTimeout = getConnection(connectionId).queryTimeout
-
-                    val resultSet = statement.executeQuery()
-                    val metaData = resultSet.metaData
-                    val columnCount = metaData.columnCount
-
-                    val columns = (1..columnCount).map { metaData.getColumnName(it) }
-                    val rows = mutableListOf<Map<String, Any?>>()
-
-                    var rowCount = 0
-                    while (resultSet.next() && rowCount < 1000) { // Limit results
-                        val row = mutableMapOf<String, Any?>()
-                        for (i in 1..columnCount) {
-                            row[columns[i - 1]] = resultSet.getObject(i)
-                        }
-                        rows.add(row)
-                        rowCount++
+        
+        return dataSource.connection.use { connection ->
+            connection.prepareStatement(query).use { statement ->
+                statement.queryTimeout = timeoutSeconds
+                
+                val resultSet = statement.executeQuery()
+                val metaData = resultSet.metaData
+                val columnCount = metaData.columnCount
+                
+                // Get column names
+                val columns = (1..columnCount).map { metaData.getColumnName(it) }
+                
+                // Get rows
+                val rows = mutableListOf<Map<String, Any?>>()
+                while (resultSet.next()) {
+                    val row = mutableMapOf<String, Any?>()
+                    for (i in 1..columnCount) {
+                        row[columns[i - 1]] = resultSet.getObject(i)
                     }
-
-                    QueryResult(
-                        columns = columns,
-                        rows = rows,
-                        rowCount = rowCount,
-                        executionTimeMs = System.currentTimeMillis() - startTime
-                    )
+                    rows.add(row)
                 }
+                
+                val executionTime = System.currentTimeMillis() - startTime
+                
+                QueryResult(
+                    columns = columns,
+                    rows = rows,
+                    rowCount = rows.size,
+                    executionTimeMs = executionTime
+                )
             }
-        } catch (e: SQLException) {
-            logger.error(e) { "Failed to execute query on connection $connectionId: $sql" }
-            throw DatabaseException("Query execution failed: ${e.message}", e)
         }
     }
-
-    fun executeUpdate(connectionId: Long, sql: String): QueryResult {
+    
+    /**
+     * Execute an update/insert/delete query
+     */
+    fun executeUpdate(dataSource: DataSource, query: String, timeoutSeconds: Int = 30): QueryResult {
         val startTime = System.currentTimeMillis()
-
-        return try {
-            getDataSource(connectionId).connection.use { connection ->
-                connection.prepareStatement(sql).use { statement ->
-                    statement.queryTimeout = getConnection(connectionId).queryTimeout
-                    val affectedRows = statement.executeUpdate()
-
-                    QueryResult(
-                        columns = emptyList(),
-                        rows = emptyList(),
-                        rowCount = 0,
-                        executionTimeMs = System.currentTimeMillis() - startTime,
-                        affectedRows = affectedRows
-                    )
-                }
+        
+        return dataSource.connection.use { connection ->
+            connection.prepareStatement(query).use { statement ->
+                statement.queryTimeout = timeoutSeconds
+                
+                val affectedRows = statement.executeUpdate()
+                val executionTime = System.currentTimeMillis() - startTime
+                
+                QueryResult(
+                    columns = emptyList(),
+                    rows = emptyList(),
+                    rowCount = 0,
+                    executionTimeMs = executionTime,
+                    affectedRows = affectedRows
+                )
             }
-        } catch (e: SQLException) {
-            logger.error(e) { "Failed to execute update on connection $connectionId: $sql" }
-            throw DatabaseException("Update execution failed: ${e.message}", e)
         }
     }
-
-    fun getConnectionInfo(connectionId: Long): Map<String, Any?> {
-        val dbConnection = getConnection(connectionId)
-
-        return mapOf(
-            "id" to dbConnection.id,
-            "name" to dbConnection.name,
-            "host" to dbConnection.host,
-            "port" to dbConnection.port,
-            "database" to dbConnection.database,
-            "username" to dbConnection.username,
-            "schema" to dbConnection.schema,
-            "isActive" to dbConnection.isActive,
-            "createdAt" to dbConnection.createdAt,
-            "description" to dbConnection.description
-        )
+    
+    /**
+     * Release a session's reference to its connection pool
+     * Automatically cleans up pool if no more sessions reference it
+     */
+    fun releaseSessionFromPool(sessionId: String, connectionInfo: DatabaseConnectionInfo) {
+        val cacheKey = "${connectionInfo.host}:${connectionInfo.port}:${connectionInfo.database}:${connectionInfo.username}"
+        
+        val sessionSet = poolSessionReferences[cacheKey]
+        if (sessionSet != null) {
+            sessionSet.remove(sessionId)
+            logger.debug { "Session $sessionId released from pool $cacheKey (${sessionSet.size} sessions remaining)" }
+            
+            // If no more sessions reference this pool, clean it up
+            if (sessionSet.isEmpty()) {
+                cleanupPoolByKey(cacheKey)
+                poolSessionReferences.remove(cacheKey)
+                logger.info { "Connection pool $cacheKey cleaned up (no more session references)" }
+            }
+        } else {
+            logger.warn { "Attempted to release session $sessionId from unknown pool $cacheKey" }
+        }
     }
-
-    fun disconnectConnection(connectionId: Long): Boolean {
-        return try {
-            // Close and remove the DataSource if present
-            dataSources[connectionId]?.let { dataSource ->
-                if (dataSource is HikariDataSource) {
+    
+    /**
+     * Release all pools referenced by a specific session (when session expires/invalidates)
+     */
+    fun releaseAllPoolsForSession(sessionId: String) {
+        val releasedPools = mutableListOf<String>()
+        
+        poolSessionReferences.forEach { (cacheKey, sessionSet) ->
+            if (sessionSet.remove(sessionId)) {
+                releasedPools.add(cacheKey)
+                logger.debug { "Session $sessionId released from pool $cacheKey (${sessionSet.size} sessions remaining)" }
+                
+                // If no more sessions reference this pool, clean it up
+                if (sessionSet.isEmpty()) {
+                    cleanupPoolByKey(cacheKey)
+                    poolSessionReferences.remove(cacheKey)
+                    logger.info { "Connection pool $cacheKey cleaned up (no more session references)" }
+                }
+            }
+        }
+        
+        if (releasedPools.isNotEmpty()) {
+            logger.info { "Session $sessionId released from ${releasedPools.size} connection pools" }
+        }
+    }
+    
+    /**
+     * Internal method to close and remove a specific pool
+     */
+    private fun cleanupPoolByKey(cacheKey: String) {
+        val dataSource = dataSourceCache.remove(cacheKey)
+        
+        if (dataSource is HikariDataSource) {
+            try {
+                dataSource.close()
+                logger.info { "Closed HikariCP pool: $cacheKey" }
+            } catch (e: Exception) {
+                logger.warn(e) { "Error closing pool: $cacheKey" }
+            }
+        }
+    }
+    
+    /**
+     * Scheduled cleanup to handle any orphaned pools (safety net)
+     */
+    @Scheduled(fixedRate = 300000) // 5 minutes
+    fun cleanupOrphanedPools() {
+        val orphanedPools = mutableListOf<String>()
+        
+        poolSessionReferences.forEach { (cacheKey, sessionSet) ->
+            if (sessionSet.isEmpty()) {
+                orphanedPools.add(cacheKey)
+            }
+        }
+        
+        orphanedPools.forEach { cacheKey ->
+            cleanupPoolByKey(cacheKey)
+            poolSessionReferences.remove(cacheKey)
+        }
+        
+        if (orphanedPools.isNotEmpty()) {
+            logger.info { "Cleaned up ${orphanedPools.size} orphaned connection pools" }
+        }
+    }
+    
+    /**
+     * Emergency cleanup of all connection pools
+     */
+    fun cleanupAllDataSources() {
+        val poolCount = dataSourceCache.size
+        
+        dataSourceCache.values.forEach { dataSource ->
+            if (dataSource is HikariDataSource) {
+                try {
                     dataSource.close()
+                } catch (e: Exception) {
+                    logger.warn(e) { "Error closing DataSource during emergency cleanup" }
                 }
             }
-            dataSources.remove(connectionId)
-            // Mark connection as inactive in repository
-            val dbConnection = getConnection(connectionId)
-            val updated = dbConnection.copy(isActive = false, updatedAt = LocalDateTime.now())
-            connectionRepository.save(updated)
-            true
-        } catch (e: Exception) {
-            logger.error(e) { "Failed to disconnect connection $connectionId" }
-            false
         }
+        
+        dataSourceCache.clear()
+        poolSessionReferences.clear()
+        
+        logger.warn { "Emergency cleanup: closed all $poolCount connection pools" }
     }
-
-    fun getConnectionDetails(connectionId: Long): DatabaseConnection? {
-        return try {
-            getConnection(connectionId)
-        } catch (e: Exception) {
-            null
-        }
+    
+    /**
+     * Get connection pool statistics for monitoring
+     */
+    fun getPoolStatistics(): Map<String, Any> {
+        return mapOf(
+            "totalPools" to dataSourceCache.size,
+            "poolDetails" to dataSourceCache.keys.map { cacheKey ->
+                val sessionCount = poolSessionReferences[cacheKey]?.size ?: 0
+                val sessionIds = poolSessionReferences[cacheKey]?.toList() ?: emptyList()
+                
+                mapOf(
+                    "pool" to cacheKey,
+                    "sessionCount" to sessionCount,
+                    "sessionIds" to sessionIds
+                )
+            }
+        )
     }
 }

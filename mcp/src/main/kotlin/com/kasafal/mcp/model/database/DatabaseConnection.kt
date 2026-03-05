@@ -1,54 +1,12 @@
 package com.kasafal.mcp.model.database
 
 import com.fasterxml.jackson.annotation.JsonIgnore
-import jakarta.persistence.*
-import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.NotNull
-import org.hibernate.validator.constraints.Range
 import java.time.LocalDateTime
 
-@Entity
-@Table(name = "database_connections")
-data class DatabaseConnection(
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long = 0,
-
-    @NotBlank
-    @Column(unique = true)
-    val name: String,
-
-    @NotBlank
-    val host: String,
-
-    @Range(min = 1, max = 65535)
-    val port: Int = 5432,
-
-    @NotBlank
-    val database: String,
-
-    @NotBlank
-    val username: String,
-
-    @JsonIgnore
-    @NotBlank
-    val encryptedPassword: String,
-
-    val schema: String = "public",
-
-    @NotNull
-    val createdAt: LocalDateTime = LocalDateTime.now(),
-
-    val updatedAt: LocalDateTime = LocalDateTime.now(),
-
-    val isActive: Boolean = true,
-
-    val maxConnections: Int = 5,
-
-    val queryTimeout: Int = 30,
-
-    val description: String? = null
-)
+/**
+ * Session-based database connection configuration.
+ * This is not persisted but used for temporary session management.
+ */
 
 data class DatabaseConnectionDto(
     val name: String,

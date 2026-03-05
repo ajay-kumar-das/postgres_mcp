@@ -2,7 +2,7 @@ package com.kasafal.mcp.controller
 
 import com.kasafal.mcp.model.mcp.McpRequest
 import com.kasafal.mcp.model.mcp.McpResponse
-import com.kasafal.mcp.service.McpServerService
+import com.kasafal.mcp.service.McpService
 import mu.KotlinLogging
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.CrossOrigin
@@ -15,26 +15,25 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/mcp")
-@CrossOrigin
 class McpController(
-    private val mcpServerService: McpServerService
+    private val mcpService: McpService
 ) {
 
     private val logger = KotlinLogging.logger {}
 
     @PostMapping
     fun handleMcpRequest(@RequestBody request: McpRequest): ResponseEntity<McpResponse> {
-        logger.info { "Received MCP request: ${request.method}" }
+        logger.info { "Received session-based MCP request: ${request.method}" }
 
-        val response = mcpServerService.handleMcpRequest(request)
+        val response = mcpService.handleRequest(request)
         return ResponseEntity.ok(response)
     }
 
     @GetMapping
     fun getToolsList(): ResponseEntity<McpResponse> {
-        logger.info { "Get tool list" }
+        logger.info { "Get session-based tool list" }
 
-        val response = mcpServerService.listTools()
+        val response = mcpService.listTools()
         return ResponseEntity.ok(response)
     }
 

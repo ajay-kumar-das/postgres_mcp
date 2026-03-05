@@ -2,34 +2,7 @@
 version: '3.8'
 
 services:
-  postgres-mcp:
-    build: .
-    container_name: postgres-mcp-server
-    ports:
-      - "8080:8080"
-    environment:
-      - SPRING_PROFILES_ACTIVE=production
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=mcp_server
-      - DB_USERNAME=mcp_user
-      - DB_PASSWORD=secure_password_123
-      - ENCRYPTION_PASSWORD=production_encryption_key_456
-      - ENCRYPTION_SALT=production_salt_789
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - mcp-network
-    restart: unless-stopped
-    volumes:
-      - ./logs:/app/logs
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/mcp/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+
 
   postgres:
     image: postgres:15-alpine

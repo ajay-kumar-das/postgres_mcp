@@ -8,12 +8,13 @@ services:
       - "8080:8080"
       - "5005:5005"  # Debug port
     environment:
-      - SPRING_PROFILES_ACTIVE=development
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-development}
       - DB_HOST=postgres-dev
       - DB_PORT=5432
-      - DB_NAME=mcp_server_dev
-      - DB_USERNAME=mcp_dev_user
-      - DB_PASSWORD=dev_password
+      - DB_NAME=${DEV_DB_NAME:-mcp_server_dev}
+      - DB_USERNAME=${DEV_DB_USERNAME:-mcp_dev_user}
+      - DB_PASSWORD=${DEV_DB_PASSWORD:?DEV_DB_PASSWORD is required}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
       - JAVA_OPTS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     depends_on:
       postgres-dev:
@@ -29,9 +30,9 @@ services:
     image: postgres:15-alpine
     container_name: postgres-mcp-db-dev
     environment:
-      POSTGRES_DB: mcp_server_dev
-      POSTGRES_USER: mcp_dev_user
-      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: ${DEV_DB_NAME:-mcp_server_dev}
+      POSTGRES_USER: ${DEV_DB_USERNAME:-mcp_dev_user}
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:?DEV_DB_PASSWORD is required}
     ports:
       - "5433:5432"  # Different port for dev
     volumes:

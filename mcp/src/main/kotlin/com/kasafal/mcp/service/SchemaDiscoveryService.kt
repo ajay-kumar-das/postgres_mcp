@@ -1,25 +1,40 @@
 package com.kasafal.mcp.service
 
 import com.kasafal.mcp.exception.DatabaseException
+import com.kasafal.mcp.exception.InvalidSQlQueryException
 import com.kasafal.mcp.model.database.*
+import com.kasafal.mcp.model.session.DatabaseOperation
 import mu.KotlinLogging
 import org.springframework.stereotype.Service
-import java.sql.ResultSet
 
 private val logger = KotlinLogging.logger {}
 
 @Service
 class SchemaDiscoveryService(
-    private val databaseService: DatabaseService
+    private val databaseService: DatabaseService,
+    private val sessionAuthenticationService: SessionAuthenticationService
 ) {
 
-    fun discoverDatabaseSchema(connectionId: Long, schemaName: String? = null): DatabaseSchemaInfo {
-        logger.info { "Discovering schema for connection $connectionId, schema: $schemaName" }
+    
+    // ==== Session-based methods ====
+    
+    /**
+     * Discover database schema using session
+     */
+    fun discoverDatabaseSchemaUsingSession(sessionId: String, schemaName: String? = null): DatabaseSchemaInfo {
+        logger.info { "Discovering schema using session, schema: $schemaName" }
+        
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
 
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
+        }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val tables = discoverTables(connection, targetSchema)
             val views = discoverViews(connection, targetSchema)
             val functions = discoverFunctions(connection, targetSchema)
@@ -34,12 +49,22 @@ class SchemaDiscoveryService(
             )
         }
     }
+    
+    /**
+     * List tables using session
+     */
+    fun listTablesUsingSession(sessionId: String, schemaName: String? = null): List<TableInfo> {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.TABLE_LISTING)
 
-    fun listTables(connectionId: Long, schemaName: String? = null): List<TableInfo> {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
+        }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val sql = """
                 SELECT t.table_name, 
                        t.table_type,
@@ -71,12 +96,22 @@ class SchemaDiscoveryService(
             }
         }
     }
+    
+    /**
+     * Describe table using session
+     */
+    fun describeTableUsingSession(sessionId: String, tableName: String, schemaName: String? = null): TableSchema {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.TABLE_DESCRIPTION)
 
-    fun describeTable(connectionId: Long, tableName: String, schemaName: String? = null): TableSchema {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
+        }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val columns = getTableColumns(connection, targetSchema, tableName)
             val primaryKeys = getPrimaryKeys(connection, targetSchema, tableName)
             val foreignKeys = getForeignKeys(connection, targetSchema, tableName)
@@ -96,12 +131,22 @@ class SchemaDiscoveryService(
             )
         }
     }
+    
+    /**
+     * Get table statistics using session
+     */
+    fun getTableStatisticsUsingSession(sessionId: String, tableName: String, schemaName: String? = null): TableStats {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.SCHEMA_DISCOVERY)
 
-    fun getTableStatistics(connectionId: Long, tableName: String, schemaName: String? = null): TableStats {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        return databaseService.getDataSource(connectionId).connection.use { connection ->
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
+        }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw DatabaseException("No connection info found for session")
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
+        val targetSchema = schemaName ?: connectionInfo.schema
+        
+        return dataSource.connection.use { connection ->
             val rowCount = getTableRowCount(connection, targetSchema, tableName) ?: 0
             val sizeBytes = getTableSize(connection, targetSchema, tableName)
             val columnStats = getColumnStatistics(connection, targetSchema, tableName)

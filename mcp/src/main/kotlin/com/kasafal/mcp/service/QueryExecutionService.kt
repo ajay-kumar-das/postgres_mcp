@@ -2,6 +2,8 @@ package com.kasafal.mcp.service
 
 import com.kasafal.mcp.exception.InvalidSQlQueryException
 import com.kasafal.mcp.model.database.*
+import com.kasafal.mcp.model.session.DatabaseOperation
+import com.kasafal.mcp.model.session.SessionAuth
 import com.kasafal.mcp.util.SqlValidator
 import mu.KotlinLogging
 import org.springframework.stereotype.Service
@@ -12,11 +14,17 @@ private val logger = KotlinLogging.logger {}
 @Service
 class QueryExecutionService(
     private val databaseService: DatabaseService,
-    private val sqlValidator: SqlValidator
+    private val sqlValidator: SqlValidator,
+    private val parameterizedQueryService: ParameterizedQueryService,
+    private val sessionAuthenticationService: SessionAuthenticationService,
+    private val schemaDiscoveryService: SchemaDiscoveryService
 ) {
 
-    fun executeSelectQuery(connectionId: Long, query: String, limit: Int = 100): QueryResult {
-        logger.info { "Executing SELECT query on connection $connectionId with limit $limit" }
+    /**
+     * Execute SELECT query using session (secure method)
+     */
+    fun executeSelectUsingSession(sessionId: String, query: String, limit: Int = 100): QueryResult {
+        logger.info { "Executing SELECT query using session with limit $limit" }
 
         // Runtime monitoring: log suspicious queries
         if (query.contains("pg_", ignoreCase = true) || query.contains("information_schema", ignoreCase = true) || query.contains("union", ignoreCase = true)) {
@@ -25,9 +33,6 @@ class QueryExecutionService(
 
         // Advanced analysis hooks (Phase 2)
         runAdvancedAnalysis(query)
-
-        // Future intelligence hooks (Phase 3)
-        runIntelligenceHooks(query, connectionId)
 
         // Validate the query
         val validation = sqlValidator.validateSelectQuery(query)
@@ -39,44 +44,41 @@ class QueryExecutionService(
         // Add limit if not present
         val limitedQuery = addLimitToQuery(query, limit)
 
-        // Enforce parameterized query usage
-        if (!isQueryParameterized(query)) {
-            throw InvalidSQlQueryException("Query must use parameters to prevent SQL injection.")
-        }
-
-        return databaseService.executeQuery(connectionId, limitedQuery)
+        return executeQueryUsingSession(sessionId, limitedQuery, DatabaseOperation.SELECT_QUERIES)
     }
 
-    fun executeQuery(connectionId: Long, query: String): QueryResult {
-        logger.info { "Executing general query on connection $connectionId" }
+    fun executeQueryUsingSession(sessionId: String, query: String, requiredOperation: DatabaseOperation): QueryResult {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, requiredOperation)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
+        }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
+        
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
+        
+        logger.info { "Executing query using session on database: ${connectionInfo.name}" }
 
-        // Runtime monitoring: log suspicious queries
-        if (query.contains("pg_", ignoreCase = true) || query.contains("information_schema", ignoreCase = true) || query.contains("union", ignoreCase = true)) {
-            logger.warn { "Suspicious query detected: $query" }
+        val validationResponse = sqlValidator.validateQuery(query)
+        if (!validationResponse.isValid) {
+            throw InvalidSQlQueryException("Invalid query: ${validationResponse.message}")
         }
 
-        // Advanced analysis hooks (Phase 2)
-        runAdvancedAnalysis(query)
-
-        // Future intelligence hooks (Phase 3)
-        runIntelligenceHooks(query, connectionId)
-
-        val validation = sqlValidator.validateQuery(query)
-        if (!validation.isValid) {
-            throw InvalidSQlQueryException("Invalid query: ${validation.message}")
-        }
-
-        // Enforce parameterized query usage
-        if (!isQueryParameterized(query)) {
-            throw InvalidSQlQueryException("Query must use parameters to prevent SQL injection.")
-        }
-
-        return if (sqlValidator.isSelectQuery(query)) {
-            databaseService.executeQuery(connectionId, query)
+        // Check if query is parameterized and route to appropriate execution method
+        return if (isQueryParameterized(query)) {
+            logger.debug { "Using parameterized query execution for query with parameters" }
+            parameterizedQueryService.executeParameterizedQuery(
+                dataSource, query, emptyMap(), connectionInfo.queryTimeoutSeconds
+            )
         } else {
-            databaseService.executeUpdate(connectionId, query)
+            logger.debug { "Using direct query execution" }
+            databaseService.executeQuery(
+                dataSource, query, connectionInfo.queryTimeoutSeconds
+            )
         }
     }
+
     // --- Security Feature Hooks ---
     private fun isQueryParameterized(query: String): Boolean {
         // Basic check: look for parameter placeholders (e.g., ? or $1)
@@ -111,27 +113,9 @@ class QueryExecutionService(
         }
     }
 
-    private fun runIntelligenceHooks(query: String, connectionId: Long) {
-        // --- Phase 3: Query learning and optimization ---
-        // Example: Log query for future learning
-        logQueryForLearning(query, connectionId)
 
-        // --- User behavior analysis (placeholder) ---
-        // Example: Track query frequency per user/connection
-        // TODO: Integrate with user session tracking
-
-        // --- Adaptive security thresholds (placeholder) ---
-        // Example: Adjust validation strictness based on recent activity
-        // TODO: Implement adaptive logic
-    }
-
-    private fun logQueryForLearning(query: String, connectionId: Long) {
-        // In production, store queries for analysis and optimization
-        logger.info { "Learning: Query logged for connection $connectionId: $query" }
-    }
-
-    fun explainQuery(connectionId: Long, query: String): ExplainResult {
-        logger.info { "Explaining query on connection $connectionId" }
+    fun explainQueryUsingSession(sessionId: String, query: String): ExplainResult {
+        logger.info { "Explaining query using session" }
 
         val validation = sqlValidator.validateSelectQuery(query)
         if (!validation.isValid) {
@@ -141,7 +125,7 @@ class QueryExecutionService(
         val explainQuery = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) $query"
 
         return try {
-            val result = databaseService.executeQuery(connectionId, explainQuery)
+            val result = executeQueryUsingSession(sessionId, explainQuery, DatabaseOperation.SELECT_QUERIES)
             parseExplainResult(result)
         } catch (e: SQLException) {
             logger.error(e) { "Failed to explain query: $query" }
@@ -149,55 +133,62 @@ class QueryExecutionService(
         }
     }
 
+
     fun validateQuery(query: String): ValidationResult {
         return sqlValidator.validateQuery(query)
     }
 
-    fun sampleTableData(connectionId: Long, tableName: String, schemaName: String? = null,
+    fun sampleTableDataUsingSession(sessionId: String, tableName: String, schemaName: String? = null,
                         sampleSize: Int = 10): List<Map<String, Any?>> {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        val query = """
-            SELECT * FROM "$targetSchema"."$tableName" 
-            ORDER BY RANDOM() 
-            LIMIT $sampleSize
-        """.trimIndent()
-
-        val result = databaseService.executeQuery(connectionId, query)
-        return result.rows
-    }
-
-    fun findDuplicates(connectionId: Long, tableName: String, columns: List<String>,
-                       schemaName: String? = null): List<Map<String, Any?>> {
-        if (columns.isEmpty()) {
-            throw InvalidSQlQueryException("At least one column must be specified for duplicate detection")
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.TABLE_SAMPLING)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
         }
-
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
-
-        val columnList = columns.joinToString(", ") { "\"$it\"" }
-        val query = """
-            SELECT $columnList, COUNT(*) as duplicate_count
-            FROM "$targetSchema"."$tableName"
-            GROUP BY $columnList
-            HAVING COUNT(*) > 1
-            ORDER BY COUNT(*) DESC
-            LIMIT 100
-        """.trimIndent()
-
-        val result = databaseService.executeQuery(connectionId, query)
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
+        val targetSchema = schemaName ?: connectionInfo.schema
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
+        
+        val result = parameterizedQueryService.executeSampleQuery(
+            dataSource, targetSchema, tableName, sampleSize, connectionInfo.queryTimeoutSeconds
+        )
         return result.rows
     }
 
-    fun analyzeDataQuality(connectionId: Long, tableName: String, schemaName: String? = null): DataQualityReport {
-        val dbConnection = databaseService.getConnection(connectionId)
-        val targetSchema = schemaName ?: dbConnection.schema
+
+    fun findDuplicatesUsingSession(sessionId: String, tableName: String, columns: List<String>,
+                       schemaName: String? = null): List<Map<String, Any?>> {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.DUPLICATE_DETECTION)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
+        }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
+        val targetSchema = schemaName ?: connectionInfo.schema
+        val dataSource = databaseService.getDataSourceForSession(sessionId, connectionInfo)
+        
+        val result = parameterizedQueryService.executeDuplicateQuery(
+            dataSource, targetSchema, tableName, columns, connectionInfo.queryTimeoutSeconds
+        )
+        return result.rows
+    }
+
+
+    fun analyzeDataQualityUsingSession(sessionId: String, tableName: String, schemaName: String? = null): DataQualityReport {
+        val sessionValidationResult = sessionAuthenticationService.validateAndUseSession(sessionId, DatabaseOperation.DATA_QUALITY_ANALYSIS)
+            ?: throw InvalidSQlQueryException("Session validation failed: Invalid or expired session")
+        if(!sessionValidationResult.isValid){
+            throw InvalidSQlQueryException(sessionValidationResult.errorMessage?:"Session is invalid/expired")
+        }
+        val connectionInfo = sessionValidationResult.sessionAuth?.connectionInfo
+            ?: throw InvalidSQlQueryException("Session validation failed: No connection info available")
+        val targetSchema = schemaName ?: connectionInfo.schema
 
         // Get total row count
         val totalRowsQuery = "SELECT COUNT(*) as total_rows FROM \"$targetSchema\".\"$tableName\""
-        val totalRowsResult = databaseService.executeQuery(connectionId, totalRowsQuery)
+        val totalRowsResult = executeQueryUsingSession(sessionId, totalRowsQuery, DatabaseOperation.SELECT_QUERIES)
         val totalRows = (totalRowsResult.rows.firstOrNull()?.get("total_rows") as? Number)?.toLong() ?: 0L
 
         if (totalRows == 0L) {
@@ -205,20 +196,20 @@ class QueryExecutionService(
         }
 
         // Get table schema to analyze each column
-        val schemaDiscoveryService = SchemaDiscoveryService(databaseService)
-        val tableSchema = schemaDiscoveryService.describeTable(connectionId, tableName, targetSchema)
+        val tableSchema = schemaDiscoveryService.describeTableUsingSession(sessionId, tableName, targetSchema)
 
         val issues = mutableListOf<DataQualityIssue>()
 
         // Analyze each column for data quality issues
         for (column in tableSchema.columns) {
-            issues.addAll(analyzeColumnQuality(connectionId, targetSchema, tableName, column, totalRows))
+            issues.addAll(analyzeColumnQualityUsingSession(sessionId, targetSchema, tableName, column, totalRows))
         }
 
         return DataQualityReport(tableName, totalRows, issues)
     }
 
-    private fun analyzeColumnQuality(connectionId: Long, schemaName: String, tableName: String,
+
+    private fun analyzeColumnQualityUsingSession(sessionId: String, schemaName: String, tableName: String,
                                      column: ColumnInfo, totalRows: Long): List<DataQualityIssue> {
         val issues = mutableListOf<DataQualityIssue>()
 
@@ -231,7 +222,7 @@ class QueryExecutionService(
                     WHERE "${column.name}" IS NULL
                 """.trimIndent()
 
-                val nullResult = databaseService.executeQuery(connectionId, nullQuery)
+                val nullResult = executeQueryUsingSession(sessionId, nullQuery, DatabaseOperation.SELECT_QUERIES)
                 val nullCount = (nullResult.rows.firstOrNull()?.get("null_count") as? Number)?.toLong() ?: 0L
 
                 if (nullCount > 0) {
@@ -254,7 +245,7 @@ class QueryExecutionService(
                     WHERE "${column.name}" = '' OR "${column.name}" IS NULL
                 """.trimIndent()
 
-                val emptyResult = databaseService.executeQuery(connectionId, emptyQuery)
+                val emptyResult = executeQueryUsingSession(sessionId, emptyQuery, DatabaseOperation.SELECT_QUERIES)
                 val emptyCount = (emptyResult.rows.firstOrNull()?.get("empty_count") as? Number)?.toLong() ?: 0L
 
                 if (emptyCount > 0) {
@@ -277,7 +268,7 @@ class QueryExecutionService(
                     WHERE "${column.name}" IS NOT NULL
                 """.trimIndent()
 
-                val duplicateResult = databaseService.executeQuery(connectionId, duplicateQuery)
+                val duplicateResult = executeQueryUsingSession(sessionId, duplicateQuery, DatabaseOperation.SELECT_QUERIES)
                 val duplicateCount = (duplicateResult.rows.firstOrNull()?.get("duplicate_count") as? Number)?.toLong() ?: 0L
 
                 if (duplicateCount > 0) {
@@ -298,6 +289,7 @@ class QueryExecutionService(
 
         return issues
     }
+
 
     private fun addLimitToQuery(query: String, limit: Int): String {
         val normalizedQuery = query.trim().lowercase()
