@@ -155,41 +155,128 @@ This transforms databases from static data stores into **interactive knowledge s
 └─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ### Detailed Architecture Flow
 
 ```
-AI Assistant (Claude)                PostgreSQL MCP Server                    User & Database
-       │                                      │                                     │
-       │ 1. start_oauth_flow                 │                                     │
-       │ ──────────────────────────────────▶ │                                     │
-       │                                     │                                     │
-       │ 2. Session + Login URL              │ 3. Secure Web Authentication       │
-       │ ◀────────────────────────────────── │ ──────────────────────────────────▶ │
-       │                                     │                                     │
-       │ "Please visit the login URL to      │ ┌─────────────────────────────────┐ │
-       │  authenticate your database"        │ │  Responsive Auth UI             │ │
-       │                                     │ │  ├─ Connection Details          │ │
-       │                                     │ │  ├─ Permission Selection        │ │
-       │                                     │ │  └─ Real-time Validation        │ │
-       │                                     │ └─────────────────────────────────┘ │
-       │                                     │                                     │
-       │ 4. discover_schema                  │ 5. Database Schema Discovery        │
-       │ ──────────────────────────────────▶ │ ──────────────────────────────────▶ │
-       │                                     │                                     │
-       │ 6. Complete Database Map            │ 7. Intelligent Analysis            │
-       │ ◀────────────────────────────────── │ ◀────────────────────────────────── │
-       │                                     │                                     │
-       │ Now Claude understands:             │ • Table relationships              │
-       │ • All tables and relationships      │ • Data types and constraints        │
-       │ • Business logic patterns           │ • Indexes and performance           │
-       │ • Data quality and patterns         │ • Sample data for context           │
-       │                                     │                                     │
-       │ 8. Natural Language Queries         │ 9. AI-Generated SQL                 │
-       │ ──────────────────────────────────▶ │ ──────────────────────────────────▶ │
-       │ "Show me customer churn patterns"   │                                     │
-       │                                     │                                     │
-       │ 10. Insights + Recommendations      │ 11. Secure Query Results           │
-       │ ◀────────────────────────────────── │ ◀────────────────────────────────── │
+┌─────────────────┐                ┌─────────────────┐                ┌─────────────────┐
+│   AI Assistant  │                │  PostgreSQL     │                │ User Browser /  │
+│    (Claude)     │                │  MCP Server     │                │   Database      │
+└─────────────────┘                └─────────────────┘                └─────────────────┘
+         │                                   │                                   │
+         │ ───────1. start_oauth_flow────────▶                                   │
+         │                                   │                                   │
+         │ ◀──────2. Session + Login URL──────                                   │
+         │                                   │                                   │
+         │ "Please visit login URL"          │                                   │
+         │                                   │ ◀───3.User visits login URL───────│
+         │                                   │                                   │
+         │                                   │ ───4.Show authentication form────▶
+         │                                   │                                   │
+         │                                   │ ◀────5.User submits credential────│
+         │                                   │                                   │
+         │                                   │ ──────6.Test DB connection───────▶
+         │                                   │                                   │
+         │                                   │ ◀──────7.Connection success───────│
+         │                                   │                                   │
+         │                                   │ ─────8.Session authenticated─────▶
+         │                                   │                                   │
+         │ ────────9.discover_schema ────────▶                                   │
+         │                                   │                                   │
+         │                                   │ ────10.Query database schema──────▶
+         │                                   │                                   │
+         │                                   │ ◀─────11.Schema+relationships─────│
+         │                                   │                                   │
+         │ ◀───12.Complete database map──────                                    │
+         │                                   │                                   │
+         │ ───────13.execute_query──────────▶                                    │
+         │                                   │                                   │
+         │                                   │ ───────14.Validate & execute──────▶
+         │                                   │                                   │
+         │                                   │ ◀───────15.Query results──────────│
+         │                                   │                                   │
+         │ ◀──────16.AI results+insights─────                                    │
+         │                                   │                                   │
+
+
+
+
+
+```
+
+### What Happens in Each Step
+
+**Steps 1-2: Session Initiation**
+- Claude requests database access via `start_oauth_flow`
+- Server creates secure session and returns login URL
+
+**Steps 3-8: User Authentication**
+- User opens login URL in browser
+- Fills out database connection form with credentials
+- Server tests connection and creates authenticated session
+
+**Steps 9-12: AI Database Discovery**
+- Claude calls `discover_schema` with session ID
+- Server automatically maps all tables, relationships, and constraints
+- Returns complete database structure to Claude
+
+**Steps 13-16: Query Execution**
+- Claude executes queries using session authentication
+- Server validates SQL and applies security limits
+- Returns formatted results with insights
+
+### Key Security Features
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Security Model                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  🔐 Zero-Trust Architecture                                    │
+│  ├─ AI never stores database credentials                       │
+│  ├─ Session-based authentication only                          │
+│  └─ Automatic session expiration                               │
+│                                                                 │
+│  🛡️ Multi-Layer Protection                                     │
+│  ├─ SQL injection prevention                                   │
+│  ├─ Query validation and sanitization                          │
+│  ├─ Read-only query enforcement                                │
+│  └─ Result size and timeout limits                             │
+│                                                                 │
+│  🔒 Session Isolation                                          │
+│  ├─ Each AI session is completely isolated                     │
+│  ├─ Encrypted credential storage in memory                     │
+│  ├─ Granular permission system (18 operations)                 │
+│  └─ Complete audit trail                                       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Security & Session Management
